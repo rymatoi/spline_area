@@ -5,6 +5,7 @@ from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform,
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
 from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
+from scipy.interpolate import CubicSpline
 from points import GroupOfPoints, FreePoint
 from inspector import InspectorWidget
 
@@ -318,7 +319,7 @@ class MainWindow(QMainWindow):
         cs_y = CubicSpline(t, xy[:, 1], bc_type='periodic')
         bezier_segments = self.spline_to_bezier(cs_x, cs_y, t)
         area = sum(self.eval_segment_area(seg) for seg in bezier_segments)
-        return abs(area) / (self.scale ** 2)
+        return abs(area)
 
     def spline_to_bezier(self, cs_x, cs_y, t_range):
         bezier_segments = []
@@ -350,8 +351,7 @@ class MainWindow(QMainWindow):
 
     def theoretical_area(self):
         a, b, R = self.a, self.b, self.R
-        area = (a - 2 * R) * (b - 2 * R) + math.pi * R * R
-        return area
+        return a * b - (4 - math.pi) * (R ** 2)
 
     def area_error_percent(self):
         theory = self.theoretical_area()
