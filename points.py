@@ -104,3 +104,31 @@ class FreePoint(QGraphicsEllipseItem):
             self.main_window._draw_spline()
             return QPointF(*contour[idx])
         return super().itemChange(change, value)
+
+
+class CenterHandle(QGraphicsEllipseItem):
+    COLOR = QColor(200, 0, 200)
+
+    def __init__(self, main_window, index):
+        self.main_window = main_window
+        self.index = index
+        radius = main_window.point_radius + 2
+        super().__init__(-radius, -radius, 2 * radius, 2 * radius)
+        self.setBrush(QBrush(self.COLOR))
+        self.setPen(QPen(Qt.black, 1))
+        self.setZValue(5)
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
+        self.update_position()
+
+    def update_position(self):
+        cx, cy = self.main_window.circle_centers[self.index]
+        self.setPos(cx, cy)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemPositionChange:
+            self.main_window.circle_centers[self.index] = (value.x(), value.y())
+            self.main_window._update_dimensions_from_centers()
+            self.main_window.redraw_all(preserve_markers=True)
+            return QPointF(*self.main_window.circle_centers[self.index])
+        return super().itemChange(change, value)

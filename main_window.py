@@ -4,9 +4,12 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform, QPainter
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
-from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
+from geometry import (arc_geom_points, rounded_rect_points,
+                      cubic_spline_closed,
+                      arc_geom_points_from_centers,
+                      rounded_rect_points_from_centers)
 from scipy.interpolate import CubicSpline
-from points import GroupOfPoints, FreePoint
+from points import GroupOfPoints, FreePoint, CenterHandle
 from inspector import InspectorWidget
 
 
@@ -33,6 +36,7 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._marker_states = None
+        self._reset_circle_centers()
         self.redraw_all()
         self._apply_transform()
 
@@ -105,19 +109,23 @@ class MainWindow(QMainWindow):
         self.view.setTransform(t)
 
     def get_contour(self):
+        if hasattr(self, "circle_centers"):
+            return rounded_rect_points_from_centers(self.circle_centers, self.R, step=self.step)
         return rounded_rect_points(self.a, self.b, self.R, step=self.step)
 
     def arc_center_indices(self, contour):
-        a2, b2, R = self.a / 2, self.b / 2, self.R
         r2 = math.sqrt(2) / 2
-        centers_geom = [(-a2 + R - R * r2, b2 - R + R * r2),
-                        (-a2 + R - R * r2, -b2 + R - R * r2),
-                        (a2 - R + R * r2, -b2 + R - R * r2),
-                        (a2 - R + R * r2, b2 - R + R * r2)]
+        c = self.circle_centers
+        centers_geom = [
+            (c[0][0] - self.R * r2, c[0][1] + self.R * r2),
+            (c[1][0] - self.R * r2, c[1][1] - self.R * r2),
+            (c[2][0] + self.R * r2, c[2][1] - self.R * r2),
+            (c[3][0] + self.R * r2, c[3][1] + self.R * r2),
+        ]
         return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
 
     def _marker_position_for_offset(self, contour, _, offset, offsets, arc_num):
-        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R)[arc_num]]
+        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points_from_centers(self.circle_centers, self.R)[arc_num]]
         center_idx = np.argmin(np.linalg.norm(contour - center_xy, axis=1))
         start_idx = np.argmin(np.linalg.norm(contour - start_xy, axis=1))
         end_idx = np.argmin(np.linalg.norm(contour - end_xy, axis=1))
@@ -164,9 +172,6 @@ class MainWindow(QMainWindow):
         self.scene.clear()
         self.spline_path = None
         self.groups.clear()
-        if hasattr(self, "center_handles"):
-            # recreate handles because scene.clear() deletes items
-            self._init_center_handles()
 
         offsets = [5, 15]
         col = dict(center=QColor(255, 255, 255), near=QColor(0, 120, 255), far=QColor(0, 200, 80))
@@ -195,6 +200,7 @@ class MainWindow(QMainWindow):
         self._draw_background(contour)
         self._draw_contour(contour)
         self._draw_spline()
+        self._init_center_handles()
 
     def get_all_marker_positions(self):
         contour = self.get_contour()
@@ -323,6 +329,30 @@ class MainWindow(QMainWindow):
         bezier_segments = self.spline_to_bezier(cs_x, cs_y, t)
         area = sum(self.eval_segment_area(seg) for seg in bezier_segments)
         return abs(area)
+
+    def _update_dimensions_from_centers(self):
+        xs_left = [self.circle_centers[0][0] - self.R, self.circle_centers[1][0] - self.R]
+        xs_right = [self.circle_centers[2][0] + self.R, self.circle_centers[3][0] + self.R]
+        ys_top = [self.circle_centers[0][1] + self.R, self.circle_centers[3][1] + self.R]
+        ys_bottom = [self.circle_centers[1][1] - self.R, self.circle_centers[2][1] - self.R]
+        self.a = max(xs_right) - min(xs_left)
+        self.b = max(ys_top) - min(ys_bottom)
+
+    def _reset_circle_centers(self):
+        a2, b2 = self.a / 2, self.b / 2
+        self.circle_centers = [
+            (-a2 + self.R, b2 - self.R),
+            (-a2 + self.R, -b2 + self.R),
+            (a2 - self.R, -b2 + self.R),
+            (a2 - self.R, b2 - self.R),
+        ]
+
+    def _init_center_handles(self):
+        self.center_handles = []
+        for i in range(4):
+            handle = CenterHandle(self, i)
+            self.scene.addItem(handle)
+            self.center_handles.append(handle)
 
     def spline_to_bezier(self, cs_x, cs_y, t_range):
         bezier_segments = []
