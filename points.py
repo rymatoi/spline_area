@@ -104,22 +104,3 @@ class FreePoint(QGraphicsEllipseItem):
             self.main_window._draw_spline()
             return QPointF(*contour[idx])
         return super().itemChange(change, value)
-
-
-class ArcCenterHandle(QGraphicsEllipseItem):
-    """Movable handle for arc centers."""
-    def __init__(self, main_window, index):
-        self.main_window = main_window
-        self.index = index
-        r = main_window.point_radius
-        super().__init__(-r, -r, 2 * r, 2 * r)
-        self.setBrush(QBrush(QColor(200, 50, 50)))
-        self.setPen(QPen(Qt.black, 1))
-        self.setZValue(5)
-        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
-
-    def itemChange(self, change, value):
-        if change == QGraphicsEllipseItem.ItemPositionChange:
-            self.main_window.center_handle_moved(self.index, value)
-        return super().itemChange(change, value)

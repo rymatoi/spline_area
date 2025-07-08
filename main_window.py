@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockW
 
 from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
 from scipy.interpolate import CubicSpline
-from points import GroupOfPoints, FreePoint, ArcCenterHandle
+from points import GroupOfPoints, FreePoint
 from inspector import InspectorWidget
 
 
@@ -34,49 +34,11 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._marker_states = None
         self.redraw_all()
-        self._init_center_handles()
         self._apply_transform()
 
     def update_free_points_radius(self):
         for fp in self.free_points:
             fp.update_radius()
-        if hasattr(self, "center_handles"):
-            for h in self.center_handles:
-                r = self.point_radius
-                h.setRect(-r, -r, 2 * r, 2 * r)
-
-    def _init_center_handles(self):
-        """Create movable handles for arc centers."""
-        self.center_handles = []
-        for i in range(4):
-            h = ArcCenterHandle(self, i)
-            self.scene.addItem(h)
-            self.center_handles.append(h)
-        self._update_center_handle_positions()
-
-    def _update_center_handle_positions(self):
-        """Position center handles based on current parameters."""
-        a2, b2, R = self.a / 2, self.b / 2, self.R
-        positions = [
-            QPointF(-a2 + R, b2 - R),
-            QPointF(-a2 + R, -b2 + R),
-            QPointF(a2 - R, -b2 + R),
-            QPointF(a2 - R, b2 - R),
-        ]
-        for h, pos in zip(self.center_handles, positions):
-            h.setPos(pos)
-
-    def center_handle_moved(self, idx, pos):
-        """Handle movement of arc center handles."""
-        x = pos.x()
-        y = pos.y()
-        self.a = 2 * (abs(x) + self.R)
-        self.b = 2 * (abs(y) + self.R)
-        self._update_center_handle_positions()
-        self.redraw_all(preserve_markers=True)
-        # update inspector spin boxes
-        self._inspector.a.setValue(self.a)
-        self._inspector.b.setValue(self.b)
 
     def eventFilter(self, obj, event):
         from PySide6.QtGui import QMouseEvent
@@ -233,8 +195,6 @@ class MainWindow(QMainWindow):
         self._draw_background(contour)
         self._draw_contour(contour)
         self._draw_spline()
-        if hasattr(self, "center_handles"):
-            self._update_center_handle_positions()
 
     def get_all_marker_positions(self):
         contour = self.get_contour()
