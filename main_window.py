@@ -202,6 +202,9 @@ class MainWindow(QMainWindow):
         self.scene.clear()
         self.spline_path = None
         self.groups.clear()
+        if hasattr(self, "center_handles"):
+            # recreate handles because scene.clear() deletes items
+            self._init_center_handles()
 
         offsets = [5, 15]
         col = dict(center=QColor(255, 255, 255), near=QColor(0, 120, 255), far=QColor(0, 200, 80))
