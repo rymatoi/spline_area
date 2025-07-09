@@ -43,7 +43,8 @@ class GroupPoint(QGraphicsEllipseItem):
 
 
 class GroupOfPoints:
-    def __init__(self, scene, main_window, get_contour, center_idx, offsets, col_c, col_n, col_f, positions=None, arc_num=0):
+    def __init__(self, scene, main_window, get_contour, center_idx, offsets, col_c, col_n, col_f, positions=None,
+                 arc_num=0):
         self.scene, self.main_window = scene, main_window
         self._contour = get_contour
         self.center_idx = center_idx
