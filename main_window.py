@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import Qt, QPointF, QTimer
 from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform, QPainter
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._marker_states = None
+        self._pending_redraw = False
         self.redraw_all()
         self._apply_transform()
 
@@ -116,6 +117,15 @@ class MainWindow(QMainWindow):
         t = QTransform()
         t.scale(self.scale, -self.scale)
         self.view.setTransform(t)
+
+    def schedule_redraw(self):
+        if not self._pending_redraw:
+            self._pending_redraw = True
+            QTimer.singleShot(30, self._do_scheduled_redraw)
+
+    def _do_scheduled_redraw(self):
+        self._pending_redraw = False
+        self.redraw_all(preserve_markers=True)
 
     def get_contour(self):
         return rounded_rect_points_centers(
