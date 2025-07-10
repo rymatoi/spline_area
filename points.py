@@ -21,6 +21,14 @@ class GroupPoint(QGraphicsEllipseItem):
             if self._syncing or not self.group.ready:
                 return value
             if self.offset == 0:
+                contour = self.group.get_contour()
+                p = np.array([value.x(), value.y()])
+                N = len(contour)
+                idx_new = int(np.argmin(np.linalg.norm(contour - p, axis=1)))
+                delta = (idx_new - self.group.center_idx + N) % N
+                if delta > N / 2:
+                    delta -= N
+                self.group.main_window.move_group_by_delta(self.group, delta, contour)
                 self.group.main_window.arc_centers[self.group.arc_num] = (
                     value.x(),
                     value.y(),
@@ -128,5 +136,6 @@ class ArcCenterPoint(QGraphicsEllipseItem):
     def itemChange(self, change, value):
         if change == QGraphicsEllipseItem.ItemPositionChange and not self._syncing:
             self.main_window.arc_centers[self.index] = (value.x(), value.y())
+            self.main_window.redraw_all(preserve_markers=True)
             return value
         return super().itemChange(change, value)

@@ -327,6 +327,20 @@ class MainWindow(QMainWindow):
                 q._syncing = False
             pt._syncing = False
 
+    def move_group_by_delta(self, group, delta, contour=None):
+        if contour is None:
+            contour = self.get_contour()
+        N = len(contour)
+        for pt in group.points:
+            p = pt.pos()
+            arr = np.array([p.x(), p.y()])
+            idx = int(np.argmin(np.linalg.norm(contour - arr, axis=1)))
+            new_idx = (idx + delta) % N
+            pt._syncing = True
+            pt.setPos(*contour[new_idx])
+            pt._syncing = False
+        group.center_idx = (group.center_idx + delta) % N
+
     def spline_area(self):
         pts = self.get_all_marker_positions()
         if len(pts) < 4:
