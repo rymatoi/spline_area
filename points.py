@@ -1,5 +1,5 @@
 import numpy as np
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QBrush, QPen, QColor
 from PySide6.QtWidgets import QGraphicsEllipseItem
 
@@ -134,8 +134,9 @@ class ArcCenterPoint(QGraphicsEllipseItem):
         self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
 
     def itemChange(self, change, value):
-        if change == QGraphicsEllipseItem.ItemPositionChange and not self._syncing:
-            self.main_window.arc_centers[self.index] = (value.x(), value.y())
-            self.main_window.redraw_all(preserve_markers=True)
+        if change == QGraphicsEllipseItem.ItemPositionHasChanged and not self._syncing:
+            pos = value if isinstance(value, QPointF) else self.pos()
+            self.main_window.arc_centers[self.index] = (pos.x(), pos.y())
+            QTimer.singleShot(0, lambda: self.main_window.redraw_all(preserve_markers=True))
             return value
         return super().itemChange(change, value)
