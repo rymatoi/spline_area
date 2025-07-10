@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockW
 
 from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
 from scipy.interpolate import CubicSpline
-from points import GroupOfPoints, FreePoint
+from points import GroupOfPoints, FreePoint, CenterPoint
 from inspector import InspectorWidget
 
 
@@ -33,12 +33,24 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._marker_states = None
+        self.reset_arc_centers()
+        self.center_points = []
         self.redraw_all()
         self._apply_transform()
+
+    def reset_arc_centers(self):
+        self.arc_centers = [
+            np.array([-self.a / 2 + self.R, self.b / 2 - self.R]),
+            np.array([-self.a / 2 + self.R, -self.b / 2 + self.R]),
+            np.array([self.a / 2 - self.R, -self.b / 2 + self.R]),
+            np.array([self.a / 2 - self.R, self.b / 2 - self.R]),
+        ]
 
     def update_free_points_radius(self):
         for fp in self.free_points:
             fp.update_radius()
+        for cp in self.center_points:
+            cp.update_radius()
 
     def eventFilter(self, obj, event):
         from PySide6.QtGui import QMouseEvent
@@ -105,19 +117,21 @@ class MainWindow(QMainWindow):
         self.view.setTransform(t)
 
     def get_contour(self):
-        return rounded_rect_points(self.a, self.b, self.R, step=self.step)
+        return rounded_rect_points(
+            self.a,
+            self.b,
+            self.R,
+            step=self.step,
+            centers=self.arc_centers,
+        )
 
     def arc_center_indices(self, contour):
-        a2, b2, R = self.a / 2, self.b / 2, self.R
-        r2 = math.sqrt(2) / 2
-        centers_geom = [(-a2 + R - R * r2, b2 - R + R * r2),
-                        (-a2 + R - R * r2, -b2 + R - R * r2),
-                        (a2 - R + R * r2, -b2 + R - R * r2),
-                        (a2 - R + R * r2, b2 - R + R * r2)]
+        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        centers_geom = [arc[0] for arc in arcs]
         return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
 
     def _marker_position_for_offset(self, contour, _, offset, offsets, arc_num):
-        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R)[arc_num]]
+        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)[arc_num]]
         center_idx = np.argmin(np.linalg.norm(contour - center_xy, axis=1))
         start_idx = np.argmin(np.linalg.norm(contour - start_xy, axis=1))
         end_idx = np.argmin(np.linalg.norm(contour - end_xy, axis=1))
@@ -188,6 +202,12 @@ class MainWindow(QMainWindow):
             self.scene.addItem(fp)
             self.free_points.append(fp)
 
+        self.center_points = []
+        for i in range(4):
+            cp = CenterPoint(self, i)
+            self.scene.addItem(cp)
+            self.center_points.append(cp)
+
         self._prev_contour = contour.copy()
         self._draw_background(contour)
         self._draw_contour(contour)
@@ -257,10 +277,12 @@ class MainWindow(QMainWindow):
         add_text("-a", -a2 - 22, 2)
         add_text(" b", 4, b2 - 14)
         add_text("-b", 4, -b2 - 18)
-        arc_info = [(-a2 + R, b2 - R, math.pi / 2, math.pi),
-                    (-a2 + R, -b2 + R, math.pi, 3 * math.pi / 2),
-                    (a2 - R, -b2 + R, 3 * math.pi / 2, 0.0),
-                    (a2 - R, b2 - R, 0.0, math.pi / 2)]
+        arc_info = [
+            (*self.arc_centers[0], math.pi / 2, math.pi),
+            (*self.arc_centers[1], math.pi, 3 * math.pi / 2),
+            (*self.arc_centers[2], 3 * math.pi / 2, 2 * math.pi),
+            (*self.arc_centers[3], 0.0, math.pi / 2),
+        ]
         pen_c = QPen(Qt.darkGray, 1, Qt.DotLine)
         pen_c.setCosmetic(True)
         pen_r = QPen(Qt.red, 1, Qt.DashLine)
