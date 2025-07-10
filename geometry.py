@@ -4,22 +4,45 @@ from scipy.interpolate import CubicSpline
 
 
 def arc_geom_points(a, b, R, centers=None):
-    """Return (center, start, end) tuples for each arc."""
+    """Return ``(center, start, end)`` tuples for each corner arc.
+
+    If ``centers`` is provided, the start and end points are computed so that
+    the arc of radius ``R`` remains tangent to the rectangle sides.
+    """
+
     a2, b2 = a / 2, b / 2
-    r2 = math.sqrt(2) / 2
     if centers is None:
         centers = [
-            (-a2 + R - R * r2, b2 - R + R * r2),
-            (-a2 + R - R * r2, -b2 + R - R * r2),
-            (a2 - R + R * r2, -b2 + R - R * r2),
-            (a2 - R + R * r2, b2 - R + R * r2),
+            (-a2 + R, b2 - R),
+            (-a2 + R, -b2 + R),
+            (a2 - R, -b2 + R),
+            (a2 - R, b2 - R),
         ]
-    starts_ends = [
-        ((-a2 + R, b2), (-a2, b2 - R)),
-        ((-a2, -b2 + R), (-a2 + R, -b2)),
-        ((a2 - R, -b2), (a2, -b2 + R)),
-        ((a2, b2 - R), (a2 - R, b2)),
-    ]
+
+    starts_ends = []
+    for i, (cx, cy) in enumerate(centers):
+        if i == 0:  # top-left
+            dx = math.sqrt(max(R * R - (b2 - cy) ** 2, 0.0))
+            start = (cx + dx, b2)
+            dy = math.sqrt(max(R * R - (cx + a2) ** 2, 0.0))
+            end = (-a2, cy - dy)
+        elif i == 1:  # bottom-left
+            dy = math.sqrt(max(R * R - (cx + a2) ** 2, 0.0))
+            start = (-a2, cy + dy)
+            dx = math.sqrt(max(R * R - (-b2 - cy) ** 2, 0.0))
+            end = (cx + dx, -b2)
+        elif i == 2:  # bottom-right
+            dx = math.sqrt(max(R * R - (-b2 - cy) ** 2, 0.0))
+            start = (cx - dx, -b2)
+            dy = math.sqrt(max(R * R - (cx - a2) ** 2, 0.0))
+            end = (a2, cy + dy)
+        else:  # top-right
+            dy = math.sqrt(max(R * R - (cx - a2) ** 2, 0.0))
+            start = (a2, cy - dy)
+            dx = math.sqrt(max(R * R - (b2 - cy) ** 2, 0.0))
+            end = (cx - dx, b2)
+        starts_ends.append((start, end))
+
     return [(c, s, e) for c, (s, e) in zip(centers, starts_ends)]
 
 

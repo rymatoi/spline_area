@@ -137,6 +137,6 @@ class ArcCenterPoint(QGraphicsEllipseItem):
         if change == QGraphicsEllipseItem.ItemPositionHasChanged and not self._syncing:
             pos = value if isinstance(value, QPointF) else self.pos()
             self.main_window.arc_centers[self.index] = (pos.x(), pos.y())
-            QTimer.singleShot(0, lambda: self.main_window.redraw_all(preserve_markers=True))
+            self.main_window.schedule_redraw()
             return value
         return super().itemChange(change, value)
