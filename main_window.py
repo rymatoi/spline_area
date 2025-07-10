@@ -284,19 +284,35 @@ class MainWindow(QMainWindow):
             self.scene.addLine(x, y, x - 10, y - 5, pen)
             self.scene.addLine(x, y, x - 10, y + 5, pen)
 
+    def move_group_by_delta(self, grp, delta, exclude_pt=None):
+        contour = self.get_contour()
+        N = len(contour)
+        grp.center_idx = (grp.center_idx + delta) % N
+        for pt in grp.points:
+            if pt is exclude_pt:
+                continue
+            arr = np.array([pt.pos().x(), pt.pos().y()])
+            idx = int(np.argmin(np.linalg.norm(contour - arr, axis=1)))
+            tgt_idx = (idx + delta) % N
+            pt._syncing = True
+            pt.setPos(*contour[tgt_idx])
+            pt._syncing = False
+
     def propagate_move(self, src_group, moved_offset, delta):
         contour = self.get_contour()
         N = len(contour)
         for grp in self.groups:
             if grp is src_group:
                 continue
-            c = grp.center_idx
-            tgt_idx = (c + delta) % N
-            p_idx = grp.offset_list.index(moved_offset)
-            pt = grp.points[p_idx]
-            pt._syncing = True
-            pt.setPos(*contour[tgt_idx])
-            if moved_offset != 0:
+            if moved_offset == 0:
+                self.move_group_by_delta(grp, delta)
+            else:
+                c = grp.center_idx
+                tgt_idx = (c + delta) % N
+                p_idx = grp.offset_list.index(moved_offset)
+                pt = grp.points[p_idx]
+                pt._syncing = True
+                pt.setPos(*contour[tgt_idx])
                 pair_off = -moved_offset
                 pair_idx = grp.offset_list.index(pair_off)
                 q = grp.points[pair_idx]
@@ -304,7 +320,7 @@ class MainWindow(QMainWindow):
                 q._syncing = True
                 q.setPos(*contour[mir_idx])
                 q._syncing = False
-            pt._syncing = False
+                pt._syncing = False
 
     def spline_area(self):
         pts = self.get_all_marker_positions()

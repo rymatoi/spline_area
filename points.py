@@ -37,6 +37,9 @@ class GroupPoint(QGraphicsEllipseItem):
             if delta > N / 2:
                 delta -= N
             self.group.main_window.propagate_move(self.group, self.offset, int(delta))
+            if self.offset == 0:
+                self.group.main_window.move_group_by_delta(self.group, int(delta), exclude_pt=self)
+                self.group.center_idx = idx
             self.group.main_window._draw_spline()
             return QPointF(*contour[idx])
         return super().itemChange(change, value)
@@ -53,7 +56,7 @@ class GroupOfPoints:
         contour = get_contour()
         for i, off in enumerate(self.offset_list):
             if off == 0:
-                col, mov = col_c, False
+                col, mov = col_c, True
             elif abs(off) == offsets[0]:
                 col, mov = col_n, True
             else:
