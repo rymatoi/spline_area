@@ -3,24 +3,24 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 
 
-def arc_geom_points(a, b, R):
+def arc_geom_points(a, b, R, centers=None):
     """Return (center, start, end) tuples for each arc."""
     a2, b2 = a / 2, b / 2
     r2 = math.sqrt(2) / 2
-    arcs = []
-    arcs.append(((-a2 + R - R * r2, b2 - R + R * r2),
-                 (-a2 + R, b2),
-                 (-a2, b2 - R)))
-    arcs.append(((-a2 + R - R * r2, -b2 + R - R * r2),
-                 (-a2, -b2 + R),
-                 (-a2 + R, -b2)))
-    arcs.append(((a2 - R + R * r2, -b2 + R - R * r2),
-                 (a2 - R, -b2),
-                 (a2, -b2 + R)))
-    arcs.append(((a2 - R + R * r2, b2 - R + R * r2),
-                 (a2, b2 - R),
-                 (a2 - R, b2)))
-    return arcs
+    if centers is None:
+        centers = [
+            (-a2 + R - R * r2, b2 - R + R * r2),
+            (-a2 + R - R * r2, -b2 + R - R * r2),
+            (a2 - R + R * r2, -b2 + R - R * r2),
+            (a2 - R + R * r2, b2 - R + R * r2),
+        ]
+    starts_ends = [
+        ((-a2 + R, b2), (-a2, b2 - R)),
+        ((-a2, -b2 + R), (-a2 + R, -b2)),
+        ((a2 - R, -b2), (a2, -b2 + R)),
+        ((a2, b2 - R), (a2 - R, b2)),
+    ]
+    return [(c, s, e) for c, (s, e) in zip(centers, starts_ends)]
 
 
 def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200):
@@ -45,6 +45,44 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200):
         arc(a2 - R, b2 - R, 0.0, math.pi / 2),
         line([a2 - R, b2], [-a2 + R, b2]),
     ])
+    seg = np.linalg.norm(np.diff(dense, axis=0, append=dense[:1]), axis=1)
+    s = np.concatenate(([0.0], np.cumsum(seg[:-1])))
+    total = s[-1] + seg[-1]
+    m = max(4, int(total / step))
+    su = np.linspace(0.0, total, m, endpoint=False)
+    x = np.interp(su, s, dense[:, 0])
+    y = np.interp(su, s, dense[:, 1])
+    return np.column_stack((x, y))
+
+
+def rounded_rect_points_centers(a, b, R, centers, *, step=5.0, n_arc=180, n_line=200):
+    arcs = arc_geom_points(a, b, R, centers)
+
+    def arc(center, start, end):
+        c = np.asarray(center)
+        s = np.asarray(start)
+        e = np.asarray(end)
+        ang0 = math.atan2(s[1] - c[1], s[0] - c[0])
+        ang1 = math.atan2(e[1] - c[1], e[0] - c[0])
+        if ang1 <= ang0:
+            ang1 += 2 * math.pi
+        r = np.linalg.norm(s - c)
+        t = np.linspace(ang0, ang1, n_arc, endpoint=False)
+        return np.column_stack((c[0] + r * np.cos(t), c[1] + r * np.sin(t)))
+
+    def line(p0, p1):
+        p0, p1 = map(np.asarray, (p0, p1))
+        t = np.linspace(0, 1, n_line, endpoint=False)[:, None]
+        return p0 + t * (p1 - p0)
+
+    dense_segs = []
+    for i in range(4):
+        c, s, e = arcs[i]
+        dense_segs.append(arc(c, s, e))
+        _, s_next, _ = arcs[(i + 1) % 4]
+        dense_segs.append(line(e, s_next))
+
+    dense = np.vstack(dense_segs)
     seg = np.linalg.norm(np.diff(dense, axis=0, append=dense[:1]), axis=1)
     s = np.concatenate(([0.0], np.cumsum(seg[:-1])))
     total = s[-1] + seg[-1]

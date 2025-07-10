@@ -20,26 +20,28 @@ class GroupPoint(QGraphicsEllipseItem):
         if change == QGraphicsEllipseItem.ItemPositionChange and self.movable:
             if self._syncing or not self.group.ready:
                 return value
+            if self.offset == 0:
+                self.group.main_window.arc_centers[self.group.arc_num] = (
+                    value.x(),
+                    value.y(),
+                )
+                self.group.main_window.redraw_all(preserve_markers=True)
+                return value
             contour = self.group.get_contour()
             p = np.array([value.x(), value.y()])
             idx = int(np.argmin(np.linalg.norm(contour - p, axis=1)))
-            if self.offset != 0:
-                pair_off = -self.offset
-                pair_idx = self.group.offset_list.index(pair_off)
-                pair_pt = self.group.points[pair_idx]
-                N, c = len(contour), self.group.center_idx
-                mir_idx = (2 * c - idx) % N
-                pair_pt._syncing = True
-                pair_pt.setPos(*contour[mir_idx])
-                pair_pt._syncing = False
+            pair_off = -self.offset
+            pair_idx = self.group.offset_list.index(pair_off)
+            pair_pt = self.group.points[pair_idx]
             N, c = len(contour), self.group.center_idx
+            mir_idx = (2 * c - idx) % N
+            pair_pt._syncing = True
+            pair_pt.setPos(*contour[mir_idx])
+            pair_pt._syncing = False
             delta = (idx - c + N) % N
             if delta > N / 2:
                 delta -= N
             self.group.main_window.propagate_move(self.group, self.offset, int(delta))
-            if self.offset == 0:
-                self.group.main_window.move_group_by_delta(self.group, int(delta), exclude_pt=self)
-                self.group.center_idx = idx
             self.group.main_window._draw_spline()
             return QPointF(*contour[idx])
         return super().itemChange(change, value)
@@ -50,6 +52,7 @@ class GroupOfPoints:
                  arc_num=0):
         self.scene, self.main_window = scene, main_window
         self._contour = get_contour
+        self.arc_num = arc_num
         self.center_idx = center_idx
         self.offset_list = [-offsets[1], -offsets[0], 0, offsets[0], offsets[1]]
         self.points, self.ready = [], False
@@ -107,4 +110,23 @@ class FreePoint(QGraphicsEllipseItem):
             self.percent = idx / len(contour)
             self.main_window._draw_spline()
             return QPointF(*contour[idx])
+        return super().itemChange(change, value)
+
+
+class ArcCenterPoint(QGraphicsEllipseItem):
+    def __init__(self, main_window, index, radius=4):
+        super().__init__(-radius, -radius, 2 * radius, 2 * radius)
+        self.main_window = main_window
+        self.index = index
+        self._syncing = False
+        self.setBrush(QBrush(QColor(200, 0, 200)))
+        self.setPen(QPen(Qt.black, 1))
+        self.setZValue(1)
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemPositionChange and not self._syncing:
+            self.main_window.arc_centers[self.index] = (value.x(), value.y())
+            return value
         return super().itemChange(change, value)

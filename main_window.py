@@ -4,9 +4,14 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform, QPainter
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
-from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
+from geometry import (
+    arc_geom_points,
+    rounded_rect_points,
+    rounded_rect_points_centers,
+    cubic_spline_closed,
+)
 from scipy.interpolate import CubicSpline
-from points import GroupOfPoints, FreePoint
+from points import GroupOfPoints, FreePoint, ArcCenterPoint
 from inspector import InspectorWidget
 
 
@@ -19,12 +24,20 @@ class MainWindow(QMainWindow):
         self.point_radius = 7
         self.line_width = 3
         self.step = 1.0
+        a2, b2 = self.a / 2, self.b / 2
+        self.arc_centers = [
+            (-a2 + self.R, b2 - self.R),
+            (-a2 + self.R, -b2 + self.R),
+            (a2 - self.R, -b2 + self.R),
+            (a2 - self.R, b2 - self.R),
+        ]
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.Antialiasing, True)
         self.setCentralWidget(self.view)
         self.groups = []
         self.free_points = []
+        self.center_points = []
         self.spline_path = None
         self.view.viewport().installEventFilter(self)
         self._inspector = InspectorWidget(self)
@@ -105,19 +118,23 @@ class MainWindow(QMainWindow):
         self.view.setTransform(t)
 
     def get_contour(self):
-        return rounded_rect_points(self.a, self.b, self.R, step=self.step)
+        return rounded_rect_points_centers(
+            self.a, self.b, self.R, self.arc_centers, step=self.step
+        )
 
     def arc_center_indices(self, contour):
-        a2, b2, R = self.a / 2, self.b / 2, self.R
-        r2 = math.sqrt(2) / 2
-        centers_geom = [(-a2 + R - R * r2, b2 - R + R * r2),
-                        (-a2 + R - R * r2, -b2 + R - R * r2),
-                        (a2 - R + R * r2, -b2 + R - R * r2),
-                        (a2 - R + R * r2, b2 - R + R * r2)]
-        return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
+        return [
+            int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1)))
+            for pt in self.arc_centers
+        ]
 
     def _marker_position_for_offset(self, contour, _, offset, offsets, arc_num):
-        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R)[arc_num]]
+        center_xy, start_xy, end_xy = [
+            np.array(p)
+            for p in arc_geom_points(
+                self.a, self.b, self.R, self.arc_centers
+            )[arc_num]
+        ]
         center_idx = np.argmin(np.linalg.norm(contour - center_xy, axis=1))
         start_idx = np.argmin(np.linalg.norm(contour - start_xy, axis=1))
         end_idx = np.argmin(np.linalg.norm(contour - end_xy, axis=1))
@@ -181,6 +198,15 @@ class MainWindow(QMainWindow):
                         positions.append(tuple(contour[new_idx]))
             grp = GroupOfPoints(self.scene, self, self.get_contour, idx, offsets, col['center'], col['near'], col['far'], positions=positions, arc_num=arc_num)
             self.groups.append(grp)
+
+        self.center_points = []
+        for i, (cx, cy) in enumerate(self.arc_centers):
+            cp = ArcCenterPoint(self, i, radius=self.point_radius / 2)
+            cp._syncing = True
+            cp.setPos(cx, cy)
+            cp._syncing = False
+            self.scene.addItem(cp)
+            self.center_points.append(cp)
 
         self.free_points = []
         for percent in self._free_points_percents:
@@ -257,22 +283,17 @@ class MainWindow(QMainWindow):
         add_text("-a", -a2 - 22, 2)
         add_text(" b", 4, b2 - 14)
         add_text("-b", 4, -b2 - 18)
-        arc_info = [(-a2 + R, b2 - R, math.pi / 2, math.pi),
-                    (-a2 + R, -b2 + R, math.pi, 3 * math.pi / 2),
-                    (a2 - R, -b2 + R, 3 * math.pi / 2, 0.0),
-                    (a2 - R, b2 - R, 0.0, math.pi / 2)]
+        arc_data = arc_geom_points(self.a, self.b, self.R, self.arc_centers)
         pen_c = QPen(Qt.darkGray, 1, Qt.DotLine)
         pen_c.setCosmetic(True)
         pen_r = QPen(Qt.red, 1, Qt.DashLine)
         pen_r.setCosmetic(True)
-        for cx, cy, a0, a1 in arc_info:
+        for (cx, cy), start, end in arc_data:
             s = 6
             self.scene.addLine(cx - s, cy, cx + s, cy, pen_c)
             self.scene.addLine(cx, cy - s, cx, cy + s, pen_c)
-            p0 = QPointF(cx + R * math.cos(a0), cy + R * math.sin(a0))
-            p1 = QPointF(cx + R * math.cos(a1), cy + R * math.sin(a1))
-            self.scene.addLine(cx, cy, p0.x(), p0.y(), pen_r)
-            self.scene.addLine(cx, cy, p1.x(), p1.y(), pen_r)
+            self.scene.addLine(cx, cy, start[0], start[1], pen_r)
+            self.scene.addLine(cx, cy, end[0], end[1], pen_r)
 
     def _arrow(self, x, y, *, vertical=False):
         pen = QPen(Qt.darkGray, 1)
@@ -284,35 +305,19 @@ class MainWindow(QMainWindow):
             self.scene.addLine(x, y, x - 10, y - 5, pen)
             self.scene.addLine(x, y, x - 10, y + 5, pen)
 
-    def move_group_by_delta(self, grp, delta, exclude_pt=None):
-        contour = self.get_contour()
-        N = len(contour)
-        grp.center_idx = (grp.center_idx + delta) % N
-        for pt in grp.points:
-            if pt is exclude_pt:
-                continue
-            arr = np.array([pt.pos().x(), pt.pos().y()])
-            idx = int(np.argmin(np.linalg.norm(contour - arr, axis=1)))
-            tgt_idx = (idx + delta) % N
-            pt._syncing = True
-            pt.setPos(*contour[tgt_idx])
-            pt._syncing = False
-
     def propagate_move(self, src_group, moved_offset, delta):
         contour = self.get_contour()
         N = len(contour)
         for grp in self.groups:
             if grp is src_group:
                 continue
-            if moved_offset == 0:
-                self.move_group_by_delta(grp, delta)
-            else:
-                c = grp.center_idx
-                tgt_idx = (c + delta) % N
-                p_idx = grp.offset_list.index(moved_offset)
-                pt = grp.points[p_idx]
-                pt._syncing = True
-                pt.setPos(*contour[tgt_idx])
+            c = grp.center_idx
+            tgt_idx = (c + delta) % N
+            p_idx = grp.offset_list.index(moved_offset)
+            pt = grp.points[p_idx]
+            pt._syncing = True
+            pt.setPos(*contour[tgt_idx])
+            if moved_offset != 0:
                 pair_off = -moved_offset
                 pair_idx = grp.offset_list.index(pair_off)
                 q = grp.points[pair_idx]
@@ -320,7 +325,7 @@ class MainWindow(QMainWindow):
                 q._syncing = True
                 q.setPos(*contour[mir_idx])
                 q._syncing = False
-                pt._syncing = False
+            pt._syncing = False
 
     def spline_area(self):
         pts = self.get_all_marker_positions()

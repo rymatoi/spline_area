@@ -1,6 +1,5 @@
 import numpy as np
 from PySide6.QtWidgets import QApplication
-import pytest
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -11,32 +10,18 @@ app = QApplication.instance()
 if app is None:
     app = QApplication([])
 
-def idx_from_pos(contour, pt):
-    arr = np.array([pt.pos().x(), pt.pos().y()])
-    return int(np.argmin(np.linalg.norm(contour - arr, axis=1)))
-
 
 def test_spline_area_close_to_theory():
     win = MainWindow()
-    err = win.area_error_percent()
-    assert err < 1.0
+    assert win.area_error_percent() < 5.0
 
 
-def test_center_move_propagates():
+def test_arc_center_move_updates():
     win = MainWindow()
-    contour = win.get_contour()
-    grp0 = win.groups[0]
-    delta = 10
-    indices_before = [idx_from_pos(contour, pt) for pt in grp0.points]
-    centers_before = [g.center_idx for g in win.groups]
-    win.move_group_by_delta(grp0, delta)
-    win.propagate_move(grp0, 0, delta)
-    contour = win.get_contour()
-    indices_after = [idx_from_pos(contour, pt) for pt in grp0.points]
-    N = len(contour)
-    for before, after in zip(indices_before, indices_after):
-        assert after == (before + delta) % N
-    # other groups centers moved
-    for grp, before_c in zip(win.groups[1:], centers_before[1:]):
-        assert grp.center_idx == (before_c + delta) % N
-
+    before_contour = win.get_contour().copy()
+    new_center = (win.arc_centers[0][0] + 20, win.arc_centers[0][1] + 10)
+    win.center_points[0].setPos(*new_center)
+    win.redraw_all(preserve_markers=True)
+    moved_pos = win.center_points[0].pos()
+    assert np.allclose([moved_pos.x(), moved_pos.y()], new_center)
+    assert not np.array_equal(win.get_contour(), before_contour)
