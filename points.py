@@ -48,6 +48,8 @@ class GroupOfPoints:
         self.scene, self.main_window = scene, main_window
         self._contour = get_contour
         self.center_idx = center_idx
+        self.offsets = offsets
+        self.arc_num = arc_num
         self.offset_list = [-offsets[1], -offsets[0], 0, offsets[0], offsets[1]]
         self.points, self.ready = [], False
         contour = get_contour()
@@ -71,6 +73,15 @@ class GroupOfPoints:
     def get_contour(self):
         return self._contour()
 
+    def update_positions(self, contour):
+        for pt, off in zip(self.points, self.offset_list):
+            pos = self.main_window._marker_position_for_offset(
+                contour, self.center_idx, off, self.offsets, arc_num=self.arc_num
+            )
+            pt._syncing = True
+            pt.setPos(*pos)
+            pt._syncing = False
+
 
 class FreePoint(QGraphicsEllipseItem):
     COLOR = QColor(255, 160, 0)
@@ -86,6 +97,10 @@ class FreePoint(QGraphicsEllipseItem):
         self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
         self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
         self.update_position()
+
+    def finish_init(self):
+        """Enable normal behavior after initial creation."""
+        self._syncing = False
 
     def update_position(self):
         contour = self.main_window.get_contour()
@@ -104,4 +119,46 @@ class FreePoint(QGraphicsEllipseItem):
             self.percent = idx / len(contour)
             self.main_window._draw_spline()
             return QPointF(*contour[idx])
+        return super().itemChange(change, value)
+
+
+class CenterPoint(QGraphicsEllipseItem):
+    COLOR = QColor(200, 50, 200)
+
+    def __init__(self, main_window, index):
+        radius = main_window.point_radius
+        super().__init__(-radius, -radius, 2 * radius, 2 * radius)
+        self.main_window = main_window
+        self.index = index
+        self._syncing = True
+        self._initialized = False
+        self.setBrush(QBrush(self.COLOR))
+        self.setPen(QPen(Qt.black, 1))
+        self.setZValue(5)
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
+        self.update_position()
+
+    def finish_init(self):
+        """Enable normal behavior after initial creation."""
+        self._syncing = False
+        self._initialized = True
+
+    def update_position(self):
+        cx, cy = self.main_window.arc_centers[self.index]
+        self._syncing = True
+        self.setPos(cx, cy)
+        self._syncing = False
+
+    def update_radius(self):
+        r = self.main_window.point_radius
+        self.setRect(-r, -r, 2 * r, 2 * r)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemPositionChange:
+            if self._syncing or not self._initialized:
+                return value
+            pos = (value.x(), value.y())
+            self.main_window.move_center(self.index, pos)
+            return QPointF(*self.main_window.arc_centers[self.index])
         return super().itemChange(change, value)

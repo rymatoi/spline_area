@@ -53,16 +53,19 @@ class InspectorWidget(QWidget):
 
     def _change_a(self, v):
         self.main_window.a = v
+        self.main_window.reset_arc_centers()
         self.main_window.redraw_all(preserve_markers=True)
         self.update_error()
 
     def _change_b(self, v):
         self.main_window.b = v
+        self.main_window.reset_arc_centers()
         self.main_window.redraw_all(preserve_markers=True)
         self.update_error()
 
     def _change_R(self, v):
         self.main_window.R = v
+        self.main_window.reset_arc_centers()
         self.main_window.redraw_all(preserve_markers=True)
         self.update_error()
 
