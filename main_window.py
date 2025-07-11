@@ -27,13 +27,13 @@ class MainWindow(QMainWindow):
         self.free_points = []
         self.spline_path = None
         self.view.viewport().installEventFilter(self)
+        self.reset_arc_centers()
         self._inspector = InspectorWidget(self)
         dock = QDockWidget("Параметры", self)
         dock.setWidget(self._inspector)
         dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._marker_states = None
-        self.reset_arc_centers()
         self.center_points = []
         self.redraw_all()
         self._apply_transform()
