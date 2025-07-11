@@ -1,4 +1,11 @@
-from PySide6.QtWidgets import QWidget, QFormLayout, QDoubleSpinBox, QSpinBox, QLabel
+from PySide6.QtWidgets import (
+    QWidget,
+    QFormLayout,
+    QDoubleSpinBox,
+    QSpinBox,
+    QLabel,
+    QPushButton,
+)
 
 
 class InspectorWidget(QWidget):
@@ -22,6 +29,10 @@ class InspectorWidget(QWidget):
         self.layout.addRow("Площадь сплайна:", self.area_label)
         self.layout.addRow("Теоретическая площадь:", self.theory_area_label)
         self.layout.addRow("Ошибка площади:", self.error_label)
+
+        self.optimize_btn = QPushButton("Оптимизировать точки")
+        self.optimize_btn.clicked.connect(self._optimize)
+        self.layout.addRow(self.optimize_btn)
 
         self.update_error()
 
@@ -88,4 +99,9 @@ class InspectorWidget(QWidget):
     def _change_step(self, v):
         self.main_window.step = v
         self.main_window.redraw_all(preserve_markers=True)
+        self.update_error()
+
+    def _optimize(self):
+        """Trigger optimization of free point positions."""
+        self.main_window.optimize_free_points()
         self.update_error()
