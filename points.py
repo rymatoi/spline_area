@@ -146,7 +146,9 @@ class CenterPoint(QGraphicsEllipseItem):
 
     def update_position(self):
         cx, cy = self.main_window.arc_centers[self.index]
+        self._syncing = True
         self.setPos(cx, cy)
+        self._syncing = False
 
     def update_radius(self):
         r = self.main_window.point_radius
