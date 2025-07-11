@@ -98,3 +98,34 @@ def cubic_spline_closed(points: np.ndarray, samples_per_seg: int = 24) -> np.nda
     cs_x = CubicSpline(t, xy[:, 0], bc_type='periodic')
     cs_y = CubicSpline(t, xy[:, 1], bc_type='periodic')
     return np.column_stack([cs_x(ts_dense), cs_y(ts_dense)])
+
+
+def rounded_rect_area(a: float, b: float, R: float, *, centers=None) -> float:
+    """Exact area of the rounded figure defined by ``centers``."""
+    if centers is None:
+        a2, b2 = a / 2, b / 2
+        centers = [
+            (-a2 + R, b2 - R),
+            (-a2 + R, -b2 + R),
+            (a2 - R, -b2 + R),
+            (a2 - R, b2 - R),
+        ]
+    ang_pairs = _arc_angles_from_centers(centers)
+    area = 0.0
+    for i in range(4):
+        cx, cy = centers[i]
+        a0, a1 = ang_pairs[i]
+        # Circular arc contribution
+        area += 0.5 * (
+            R * (cx * (math.sin(a1) - math.sin(a0)) - cy * (math.cos(a1) - math.cos(a0)))
+            + R * R * (a1 - a0)
+        )
+        j = (i + 1) % 4
+        p1 = (cx + R * math.cos(a1), cy + R * math.sin(a1))
+        p2 = (
+            centers[j][0] + R * math.cos(ang_pairs[j][0]),
+            centers[j][1] + R * math.sin(ang_pairs[j][0]),
+        )
+        # Tangent line contribution
+        area += 0.5 * (p1[0] * p2[1] - p1[1] * p2[0])
+    return abs(area)

@@ -3,7 +3,12 @@ import sys
 import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from geometry import rounded_rect_points, arc_geom_points, _arc_angles_from_centers
+from geometry import (
+    rounded_rect_points,
+    arc_geom_points,
+    _arc_angles_from_centers,
+    rounded_rect_area,
+)
 
 
 def default_centers(a, b, R):
@@ -75,3 +80,19 @@ def test_lines_are_tangents():
         r2 = start_pt_next - c2
         assert np.isclose(np.dot(line_vec, r1), 0.0)
         assert np.isclose(np.dot(line_vec, r2), 0.0)
+
+
+def test_rounded_area_matches_formula():
+    a, b, R = 200, 100, 20
+    area_calc = rounded_rect_area(a, b, R)
+    expected = a * b - (4 - np.pi) * (R ** 2)
+    assert np.isclose(area_calc, expected)
+
+
+def test_area_changes_with_moved_centers():
+    a, b, R = 200, 100, 20
+    centers = default_centers(a, b, R)
+    default_area = rounded_rect_area(a, b, R, centers=centers)
+    centers[0] = (centers[0][0] - 30, centers[0][1] + 15)
+    changed = rounded_rect_area(a, b, R, centers=centers)
+    assert not np.isclose(changed, default_area)

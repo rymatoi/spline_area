@@ -289,7 +289,10 @@ class MainWindow(QMainWindow):
     def _draw_background(self, contour):
         a2, b2, R, m = self.a / 2, self.b / 2, self.R, 40
         for it in getattr(self, 'background_items', []):
-            self.scene.removeItem(it)
+            try:
+                self.scene.removeItem(it)
+            except RuntimeError:
+                pass
         self.background_items = []
 
         pen_axis = QPen(Qt.darkGray, 1)
@@ -408,8 +411,8 @@ class MainWindow(QMainWindow):
         )
 
     def theoretical_area(self):
-        a, b, R = self.a, self.b, self.R
-        return a * b - (4 - math.pi) * (R ** 2)
+        from geometry import rounded_rect_area
+        return rounded_rect_area(self.a, self.b, self.R, centers=self.arc_centers)
 
     def area_error_percent(self):
         theory = self.theoretical_area()
