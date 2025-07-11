@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockW
 
 from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
 from scipy.interpolate import CubicSpline
+from scipy.optimize import minimize
 from points import GroupOfPoints, FreePoint, CenterPoint
 from inspector import InspectorWidget
 
@@ -166,9 +167,12 @@ class MainWindow(QMainWindow):
         elif offset == -offsets[1]:
             return contour[start_idx]
         elif offset == offsets[0]:
-            pos = 0.6 * center_xy + 0.4 * end_xy
+            # place midway between the arc midpoint (white) and the line contact
+            # point (green)
+            pos = 0.5 * center_xy + 0.5 * end_xy
         elif offset == -offsets[0]:
-            pos = 0.6 * center_xy + 0.4 * start_xy
+            # symmetric case for the opposite side of the arc
+            pos = 0.5 * center_xy + 0.5 * start_xy
         else:
             pos = center_xy
         idx = np.argmin(np.linalg.norm(contour - pos, axis=1))
@@ -420,3 +424,94 @@ class MainWindow(QMainWindow):
             return 0.0
         area = self.spline_area()
         return 100.0 * abs(area - theory) / theory
+
+    # ------------------------------------------------------------------
+    # Optimization of free point placement
+    # ------------------------------------------------------------------
+    def optimize_free_points(self):
+        """Position two orange markers on each straight segment to minimise
+        deviation of the spline from the theoretical contour."""
+        contour = self.get_contour()
+        N = len(contour)
+
+        # Determine metadata for the four straight segments
+        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        line_meta = []
+        for i in range(4):
+            start_pt = np.array(arcs[i][2])
+            end_pt = np.array(arcs[(i + 1) % 4][1])
+            start_idx = int(np.argmin(np.linalg.norm(contour - start_pt, axis=1)))
+            end_idx = int(np.argmin(np.linalg.norm(contour - end_pt, axis=1)))
+            diff = (end_idx - start_idx) % N
+            line_meta.append({
+                "start_idx": start_idx,
+                "diff": diff,
+                "start_pt": start_pt,
+                "end_pt": end_pt,
+            })
+
+        def build_anchor_positions(params):
+            pts = []
+            # existing arc markers
+            for grp in self.groups:
+                for pt in grp.points:
+                    p = pt.pos()
+                    arr = np.array([p.x(), p.y()])
+                    idx = int(np.argmin(np.linalg.norm(contour - arr, axis=1)))
+                    percent = idx / N
+                    pts.append((percent, (p.x(), p.y())))
+
+            # candidate free points
+            k = 0
+            for meta in line_meta:
+                for _ in range(2):
+                    t = float(params[k])
+                    k += 1
+                    percent = (meta["start_idx"] + t * meta["diff"]) % N / N
+                    xy = tuple(meta["start_pt"] + t * (meta["end_pt"] - meta["start_pt"]))
+                    pts.append((percent, xy))
+
+            pts.sort(key=lambda x: x[0])
+            return [xy for _, xy in pts]
+
+
+        def error_func(params):
+            """Objective: minimize variance of distances between contour and spline."""
+            anchor = build_anchor_positions(params)
+            spline = cubic_spline_closed(np.array(anchor), samples_per_seg=12)
+            dists = np.linalg.norm(contour[:, None, :] - spline[None, :, :], axis=2)
+            min_dists = np.min(dists, axis=1)
+            return np.mean(min_dists ** 2)
+
+        x0 = [0.25, 0.75] * 4
+        bounds = [(0.0, 1.0)] * 8
+        res = minimize(
+            error_func,
+            x0,
+            method="Powell",
+            bounds=bounds,
+            options={"maxiter": 40, "disp": False},
+        )
+        best = res.x
+
+        # remove old free points
+        for fp in self.free_points:
+            try:
+                self.scene.removeItem(fp)
+            except RuntimeError:
+                pass
+        self.free_points = []
+
+        # add new free points at optimal locations
+        k = 0
+        for meta in line_meta:
+            for _ in range(2):
+                t = float(best[k])
+                k += 1
+                percent = (meta["start_idx"] + t * meta["diff"]) % N / N
+                fp = FreePoint(self, percent)
+                self.scene.addItem(fp)
+                self.free_points.append(fp)
+
+        self.free_points.sort(key=lambda fp: fp.percent)
+        self._draw_spline()
