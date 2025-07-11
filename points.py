@@ -87,6 +87,10 @@ class FreePoint(QGraphicsEllipseItem):
         self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
         self.update_position()
 
+    def finish_init(self):
+        """Enable normal behavior after initial creation."""
+        self._syncing = False
+
     def update_position(self):
         contour = self.main_window.get_contour()
         idx = int(round(self.percent * len(contour))) % len(contour)
@@ -115,13 +119,19 @@ class CenterPoint(QGraphicsEllipseItem):
         super().__init__(-radius, -radius, 2 * radius, 2 * radius)
         self.main_window = main_window
         self.index = index
-        self._syncing = False
+        self._syncing = True
+        self._initialized = False
         self.setBrush(QBrush(self.COLOR))
         self.setPen(QPen(Qt.black, 1))
         self.setZValue(5)
         self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
         self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
         self.update_position()
+
+    def finish_init(self):
+        """Enable normal behavior after initial creation."""
+        self._syncing = False
+        self._initialized = True
 
     def update_position(self):
         cx, cy = self.main_window.arc_centers[self.index]
@@ -133,9 +143,9 @@ class CenterPoint(QGraphicsEllipseItem):
 
     def itemChange(self, change, value):
         if change == QGraphicsEllipseItem.ItemPositionChange:
-            if self._syncing:
+            if self._syncing or not self._initialized:
                 return value
-            self.main_window.arc_centers[self.index] = np.array([value.x(), value.y()])
-            self.main_window.redraw_all(preserve_markers=True)
+            pos = (value.x(), value.y())
+            self.main_window.move_center(self.index, pos)
             return QPointF(*self.main_window.arc_centers[self.index])
         return super().itemChange(change, value)

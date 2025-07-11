@@ -52,6 +52,15 @@ class MainWindow(QMainWindow):
         for cp in self.center_points:
             cp.update_radius()
 
+    def move_center(self, index, pos):
+        """Update a circle center and redraw without recursion."""
+        self.arc_centers[index] = np.array(pos)
+        for cp in self.center_points:
+            cp._syncing = True
+        self.redraw_all(preserve_markers=True)
+        for cp in self.center_points:
+            cp._syncing = False
+
     def eventFilter(self, obj, event):
         from PySide6.QtGui import QMouseEvent
         if isinstance(event, QMouseEvent) and event.type() == QMouseEvent.MouseButtonPress:
@@ -206,6 +215,7 @@ class MainWindow(QMainWindow):
         for i in range(4):
             cp = CenterPoint(self, i)
             self.scene.addItem(cp)
+            cp.finish_init()
             self.center_points.append(cp)
 
         self._prev_contour = contour.copy()
