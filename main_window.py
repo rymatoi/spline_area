@@ -28,6 +28,7 @@ class MainWindow(QMainWindow):
         self.spline_path = None
         self.view.viewport().installEventFilter(self)
         self.reset_arc_centers()
+        self._center_update_scheduled = False
         self._inspector = InspectorWidget(self)
         dock = QDockWidget("Параметры", self)
         dock.setWidget(self._inspector)
@@ -53,13 +54,21 @@ class MainWindow(QMainWindow):
             cp.update_radius()
 
     def move_center(self, index, pos):
-        """Update a circle center and redraw without recursion."""
+        """Update a circle center and schedule redraw once the event is processed."""
         self.arc_centers[index] = np.array(pos)
-        for cp in self.center_points:
-            cp._syncing = True
-        self.redraw_all(preserve_markers=True)
-        for cp in self.center_points:
-            cp._syncing = False
+        if not self._center_update_scheduled:
+            self._center_update_scheduled = True
+            from PySide6.QtCore import QTimer
+
+            def update():
+                for cp in self.center_points:
+                    cp._syncing = True
+                self.redraw_all(preserve_markers=True)
+                for cp in self.center_points:
+                    cp._syncing = False
+                self._center_update_scheduled = False
+
+            QTimer.singleShot(0, update)
 
     def eventFilter(self, obj, event):
         from PySide6.QtGui import QMouseEvent
