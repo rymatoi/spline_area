@@ -11,5 +11,4 @@ def test_move_center_updates_geometry():
     win = MainWindow()
     orig = win.arc_centers[0].copy()
     win.move_center(0, (orig[0] + 10, orig[1] + 20))
-    app.processEvents()
     assert np.allclose(win.arc_centers[0], [orig[0] + 10, orig[1] + 20])

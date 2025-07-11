@@ -48,6 +48,8 @@ class GroupOfPoints:
         self.scene, self.main_window = scene, main_window
         self._contour = get_contour
         self.center_idx = center_idx
+        self.offsets = offsets
+        self.arc_num = arc_num
         self.offset_list = [-offsets[1], -offsets[0], 0, offsets[0], offsets[1]]
         self.points, self.ready = [], False
         contour = get_contour()
@@ -70,6 +72,15 @@ class GroupOfPoints:
 
     def get_contour(self):
         return self._contour()
+
+    def update_positions(self, contour):
+        for pt, off in zip(self.points, self.offset_list):
+            pos = self.main_window._marker_position_for_offset(
+                contour, self.center_idx, off, self.offsets, arc_num=self.arc_num
+            )
+            pt._syncing = True
+            pt.setPos(*pos)
+            pt._syncing = False
 
 
 class FreePoint(QGraphicsEllipseItem):

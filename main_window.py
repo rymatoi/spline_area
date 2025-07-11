@@ -26,9 +26,10 @@ class MainWindow(QMainWindow):
         self.groups = []
         self.free_points = []
         self.spline_path = None
+        self.contour_item = None
+        self.background_items = []
         self.view.viewport().installEventFilter(self)
         self.reset_arc_centers()
-        self._center_update_scheduled = False
         self._inspector = InspectorWidget(self)
         dock = QDockWidget("Параметры", self)
         dock.setWidget(self._inspector)
@@ -54,21 +55,9 @@ class MainWindow(QMainWindow):
             cp.update_radius()
 
     def move_center(self, index, pos):
-        """Update a circle center and schedule redraw once the event is processed."""
+        """Update a circle center and redraw geometry immediately."""
         self.arc_centers[index] = np.array(pos)
-        if not self._center_update_scheduled:
-            self._center_update_scheduled = True
-            from PySide6.QtCore import QTimer
-
-            def update():
-                for cp in self.center_points:
-                    cp._syncing = True
-                self.redraw_all(preserve_markers=True)
-                for cp in self.center_points:
-                    cp._syncing = False
-                self._center_update_scheduled = False
-
-            QTimer.singleShot(0, update)
+        self.update_after_center_move()
 
     def eventFilter(self, obj, event):
         from PySide6.QtGui import QMouseEvent
@@ -147,6 +136,23 @@ class MainWindow(QMainWindow):
         arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
         centers_geom = [arc[0] for arc in arcs]
         return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
+
+    def update_after_center_move(self):
+        """Recompute geometry after circle center change without clearing points."""
+        contour = self.get_contour()
+        arc_indices = self.arc_center_indices(contour)
+        for arc_num, (grp, idx) in enumerate(zip(self.groups, arc_indices)):
+            grp.center_idx = idx
+            grp.update_positions(contour)
+        for fp in self.free_points:
+            fp.update_position()
+        for cp in self.center_points:
+            if not cp._syncing:
+                cp.update_position()
+        self._draw_background(contour)
+        self._draw_contour(contour)
+        self._draw_spline()
+        self._prev_contour = contour.copy()
 
     def _marker_position_for_offset(self, contour, _, offset, offsets, arc_num):
         center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)[arc_num]]
@@ -273,22 +279,32 @@ class MainWindow(QMainWindow):
         for x, y in contour[1:]:
             path.lineTo(x, y)
         path.closeSubpath()
-        self.scene.addPath(path, QPen(Qt.blue, self.line_width))
+        if self.contour_item is not None:
+            try:
+                self.scene.removeItem(self.contour_item)
+            except RuntimeError:
+                pass
+        self.contour_item = self.scene.addPath(path, QPen(Qt.blue, self.line_width))
 
     def _draw_background(self, contour):
         a2, b2, R, m = self.a / 2, self.b / 2, self.R, 40
+        for it in getattr(self, 'background_items', []):
+            self.scene.removeItem(it)
+        self.background_items = []
+
         pen_axis = QPen(Qt.darkGray, 1)
         pen_axis.setCosmetic(True)
-        self.scene.addLine(-a2 - m, 0, a2 + m, 0, pen_axis)
-        self.scene.addLine(0, -b2 - m, 0, b2 + m, pen_axis)
-        self._arrow(a2 + m, 0)
-        self._arrow(0, b2 + m, vertical=True)
+        self.background_items.append(self.scene.addLine(-a2 - m, 0, a2 + m, 0, pen_axis))
+        self.background_items.append(self.scene.addLine(0, -b2 - m, 0, b2 + m, pen_axis))
+        self.background_items.extend(self._arrow(a2 + m, 0))
+        self.background_items.extend(self._arrow(0, b2 + m, vertical=True))
         f = QFont("Tahoma", 10)
 
         def add_text(txt, x, y):
             item = self.scene.addText(txt, f)
             item.setPos(x, y)
             item.setTransform(QTransform().scale(1, -1))
+            self.background_items.append(item)
 
         add_text("x", a2 + m - 15, -18)
         add_text("y", 8, b2 + m - 20)
@@ -308,22 +324,24 @@ class MainWindow(QMainWindow):
         pen_r.setCosmetic(True)
         for cx, cy, a0, a1 in arc_info:
             s = 6
-            self.scene.addLine(cx - s, cy, cx + s, cy, pen_c)
-            self.scene.addLine(cx, cy - s, cx, cy + s, pen_c)
+            self.background_items.append(self.scene.addLine(cx - s, cy, cx + s, cy, pen_c))
+            self.background_items.append(self.scene.addLine(cx, cy - s, cx, cy + s, pen_c))
             p0 = QPointF(cx + R * math.cos(a0), cy + R * math.sin(a0))
             p1 = QPointF(cx + R * math.cos(a1), cy + R * math.sin(a1))
-            self.scene.addLine(cx, cy, p0.x(), p0.y(), pen_r)
-            self.scene.addLine(cx, cy, p1.x(), p1.y(), pen_r)
+            self.background_items.append(self.scene.addLine(cx, cy, p0.x(), p0.y(), pen_r))
+            self.background_items.append(self.scene.addLine(cx, cy, p1.x(), p1.y(), pen_r))
 
     def _arrow(self, x, y, *, vertical=False):
         pen = QPen(Qt.darkGray, 1)
         pen.setCosmetic(True)
         if vertical:
-            self.scene.addLine(x, y, x - 5, y - 10, pen)
-            self.scene.addLine(x, y, x + 5, y - 10, pen)
+            line1 = self.scene.addLine(x, y, x - 5, y - 10, pen)
+            line2 = self.scene.addLine(x, y, x + 5, y - 10, pen)
+            return line1, line2
         else:
-            self.scene.addLine(x, y, x - 10, y - 5, pen)
-            self.scene.addLine(x, y, x - 10, y + 5, pen)
+            line1 = self.scene.addLine(x, y, x - 10, y - 5, pen)
+            line2 = self.scene.addLine(x, y, x - 10, y + 5, pen)
+            return line1, line2
 
     def propagate_move(self, src_group, moved_offset, delta):
         contour = self.get_contour()
