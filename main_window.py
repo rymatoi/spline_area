@@ -430,7 +430,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def optimize_free_points(self):
         """Position two orange markers on each straight segment to minimise
-        deviation of the spline from the theoretical contour and area."""
+        deviation of the spline from the theoretical contour."""
         contour = self.get_contour()
         N = len(contour)
 
@@ -474,31 +474,23 @@ class MainWindow(QMainWindow):
             pts.sort(key=lambda x: x[0])
             return [xy for _, xy in pts]
 
-        def area_for_points(anchor):
-            pts = np.array(anchor)
-            if len(pts) < 4:
-                return 0.0
-            Np = len(pts)
-            t = np.arange(Np + 1)
-            xy = np.vstack([pts, pts[0]])
-            cs_x = CubicSpline(t, xy[:, 0], bc_type="periodic")
-            cs_y = CubicSpline(t, xy[:, 1], bc_type="periodic")
-            bezier_segments = self.spline_to_bezier(cs_x, cs_y, t)
-            return abs(sum(self.eval_segment_area(seg) for seg in bezier_segments))
-
-        theory_area = self.theoretical_area()
 
         def error_func(params):
             anchor = build_anchor_positions(params)
-            spline = cubic_spline_closed(np.array(anchor), samples_per_seg=24)
+            spline = cubic_spline_closed(np.array(anchor), samples_per_seg=12)
             dists = np.linalg.norm(contour[:, None, :] - spline[None, :, :], axis=2)
             dist_err = np.min(dists, axis=1).sum()
-            area_err = abs(area_for_points(anchor) - theory_area)
-            return dist_err + area_err
+            return dist_err
 
         x0 = [0.25, 0.75] * 4
         bounds = [(0.0, 1.0)] * 8
-        res = minimize(error_func, x0, method="Powell", bounds=bounds)
+        res = minimize(
+            error_func,
+            x0,
+            method="Powell",
+            bounds=bounds,
+            options={"maxiter": 40, "disp": False},
+        )
         best = res.x
 
         # remove old free points
