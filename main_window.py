@@ -312,22 +312,21 @@ class MainWindow(QMainWindow):
         add_text("-a", -a2 - 22, 2)
         add_text(" b", 4, b2 - 14)
         add_text("-b", 4, -b2 - 18)
+        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
         arc_info = [
-            (*self.arc_centers[0], math.pi / 2, math.pi),
-            (*self.arc_centers[1], math.pi, 3 * math.pi / 2),
-            (*self.arc_centers[2], 3 * math.pi / 2, 2 * math.pi),
-            (*self.arc_centers[3], 0.0, math.pi / 2),
+            (self.arc_centers[i][0], self.arc_centers[i][1], arcs[i][1], arcs[i][2])
+            for i in range(4)
         ]
         pen_c = QPen(Qt.darkGray, 1, Qt.DotLine)
         pen_c.setCosmetic(True)
         pen_r = QPen(Qt.red, 1, Qt.DashLine)
         pen_r.setCosmetic(True)
-        for cx, cy, a0, a1 in arc_info:
+        for cx, cy, start_pt, end_pt in arc_info:
             s = 6
             self.background_items.append(self.scene.addLine(cx - s, cy, cx + s, cy, pen_c))
             self.background_items.append(self.scene.addLine(cx, cy - s, cx, cy + s, pen_c))
-            p0 = QPointF(cx + R * math.cos(a0), cy + R * math.sin(a0))
-            p1 = QPointF(cx + R * math.cos(a1), cy + R * math.sin(a1))
+            p0 = QPointF(*start_pt)
+            p1 = QPointF(*end_pt)
             self.background_items.append(self.scene.addLine(cx, cy, p0.x(), p0.y(), pen_r))
             self.background_items.append(self.scene.addLine(cx, cy, p1.x(), p1.y(), pen_r))
 

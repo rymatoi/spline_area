@@ -3,6 +3,25 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 
 
+def _arc_angles_from_centers(centers):
+    """Return start/end angles for arcs so lines stay tangent."""
+    c = [np.asarray(p, dtype=float) for p in centers]
+    dirs = []
+    for i in range(4):
+        d = c[(i + 1) % 4] - c[i]
+        v = d / np.linalg.norm(d)
+        n = np.array([v[1], -v[0]])  # outward normal for tangent
+        dirs.append(n)
+    ang_pairs = []
+    for i in range(4):
+        a0 = math.atan2(dirs[(i - 1) % 4][1], dirs[(i - 1) % 4][0])
+        a1 = math.atan2(dirs[i][1], dirs[i][0])
+        if a1 <= a0:
+            a1 += 2 * math.pi
+        ang_pairs.append((a0, a1))
+    return ang_pairs
+
+
 def arc_geom_points(a, b, R, *, centers=None):
     """Return (arc_mid, start, end) tuples for each corner arc."""
     if centers is None:
@@ -14,12 +33,7 @@ def arc_geom_points(a, b, R, *, centers=None):
             (a2 - R, b2 - R),
         ]
 
-    ang = [
-        (math.pi / 2, math.pi),
-        (math.pi, 3 * math.pi / 2),
-        (3 * math.pi / 2, 2 * math.pi),
-        (0.0, math.pi / 2),
-    ]
+    ang = _arc_angles_from_centers(centers)
     arcs = []
     for (cx, cy), (a0, a1) in zip(centers, ang):
         amid = (a0 + a1) / 2
@@ -51,12 +65,7 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
         t = np.linspace(0, 1, n_line, endpoint=False)[:, None]
         return p0 + t * (p1 - p0)
 
-    ang = [
-        (math.pi / 2, math.pi),
-        (math.pi, 3 * math.pi / 2),
-        (3 * math.pi / 2, 2 * math.pi),
-        (0.0, math.pi / 2),
-    ]
+    ang = _arc_angles_from_centers(centers)
     arcs = [arc(cx, cy, a0, a1) for (cx, cy), (a0, a1) in zip(centers, ang)]
     lines = [
         line(arcs[0][-1], arcs[1][0]),
