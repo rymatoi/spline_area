@@ -476,11 +476,12 @@ class MainWindow(QMainWindow):
 
 
         def error_func(params):
+            """Objective: minimize variance of distances between contour and spline."""
             anchor = build_anchor_positions(params)
             spline = cubic_spline_closed(np.array(anchor), samples_per_seg=12)
             dists = np.linalg.norm(contour[:, None, :] - spline[None, :, :], axis=2)
-            dist_err = np.min(dists, axis=1).sum()
-            return dist_err
+            min_dists = np.min(dists, axis=1)
+            return np.mean(min_dists ** 2)
 
         x0 = [0.25, 0.75] * 4
         bounds = [(0.0, 1.0)] * 8
