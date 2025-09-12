@@ -4,10 +4,10 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform, QPainter
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
-from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
+from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed, _arc_angles_from_centers
 from scipy.interpolate import CubicSpline
 from scipy.optimize import minimize
-from points import GroupOfPoints, FreePoint, CenterPoint
+from points import GroupOfPoints, FreePoint, CenterPoint, BezierCtrlPoint
 from inspector import InspectorWidget
 
 
@@ -30,6 +30,8 @@ class MainWindow(QMainWindow):
         self.contour_item = None
         self.background_items = []
         self.view.viewport().installEventFilter(self)
+        self.bezier_ctrl_lens = []
+        self.bezier_ctrl_points = []
         self.reset_arc_centers()
         self._inspector = InspectorWidget(self)
         dock = QDockWidget("Параметры", self)
@@ -48,12 +50,60 @@ class MainWindow(QMainWindow):
             np.array([self.a / 2 - self.R, -self.b / 2 + self.R]),
             np.array([self.a / 2 - self.R, self.b / 2 - self.R]),
         ]
+        self.compute_default_bezier_lens()
+
+    def compute_default_bezier_lens(self):
+        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        self.bezier_ctrl_lens = []
+        for i in range(4):
+            p0 = np.array(arcs[i][2])
+            p3 = np.array(arcs[(i + 1) % 4][1])
+            chord = np.linalg.norm(p3 - p0)
+            d = chord / 3.0
+            self.bezier_ctrl_lens.append([d, d])
+
+    def _bezier_endpoints(self, seg_idx):
+        ang = _arc_angles_from_centers(self.arc_centers)
+        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        p0 = np.array(arcs[seg_idx][2])
+        p3 = np.array(arcs[(seg_idx + 1) % 4][1])
+        ang1 = ang[seg_idx][1]
+        ang0_next = ang[(seg_idx + 1) % 4][0]
+        t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+        t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+        return p0, p3, t0, t1
+
+    def bezier_ctrl_position(self, seg_idx, ctrl_idx):
+        p0, p3, t0, t1 = self._bezier_endpoints(seg_idx)
+        l1, l2 = self.bezier_ctrl_lens[seg_idx]
+        if ctrl_idx == 0:
+            return p0 + l1 * t0
+        else:
+            return p3 - l2 * t1
+
+    def update_after_bezier_move(self):
+        contour = self.get_contour()
+        for grp in self.groups:
+            grp.update_positions(contour)
+        for fp in self.free_points:
+            fp.update_position()
+        for pair in self.bezier_ctrl_points:
+            for cp in pair:
+                if not cp._syncing:
+                    cp.update_position()
+        self._draw_background(contour)
+        self._draw_contour(contour)
+        self._draw_spline()
+        self._prev_contour = contour.copy()
 
     def update_free_points_radius(self):
         for fp in self.free_points:
             fp.update_radius()
         for cp in self.center_points:
             cp.update_radius()
+        for pair in self.bezier_ctrl_points:
+            for bp in pair:
+                bp.update_radius()
 
     def move_center(self, index, pos):
         """Update a circle center and redraw geometry immediately."""
@@ -131,6 +181,7 @@ class MainWindow(QMainWindow):
             self.R,
             step=self.step,
             centers=self.arc_centers,
+            bezier_ctrl_lens=self.bezier_ctrl_lens,
         )
 
     def arc_center_indices(self, contour):
@@ -150,6 +201,9 @@ class MainWindow(QMainWindow):
         for cp in self.center_points:
             if not cp._syncing:
                 cp.update_position()
+        for pair in self.bezier_ctrl_points:
+            for bp in pair:
+                bp.update_position()
         self._draw_background(contour)
         self._draw_contour(contour)
         self._draw_spline()
@@ -236,6 +290,16 @@ class MainWindow(QMainWindow):
             self.scene.addItem(cp)
             cp.finish_init()
             self.center_points.append(cp)
+
+        self.bezier_ctrl_points = []
+        for i in range(4):
+            cp1 = BezierCtrlPoint(self, i, 0)
+            cp2 = BezierCtrlPoint(self, i, 1)
+            self.scene.addItem(cp1)
+            self.scene.addItem(cp2)
+            cp1.finish_init()
+            cp2.finish_init()
+            self.bezier_ctrl_points.append((cp1, cp2))
 
         self._prev_contour = contour.copy()
         self._draw_background(contour)

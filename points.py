@@ -162,3 +162,49 @@ class CenterPoint(QGraphicsEllipseItem):
             self.main_window.move_center(self.index, pos)
             return QPointF(*self.main_window.arc_centers[self.index])
         return super().itemChange(change, value)
+
+
+class BezierCtrlPoint(QGraphicsEllipseItem):
+    COLOR = QColor(200, 200, 0)
+
+    def __init__(self, main_window, seg_idx, ctrl_idx):
+        self.main_window = main_window
+        self.seg_idx = seg_idx
+        self.ctrl_idx = ctrl_idx
+        radius = main_window.point_radius
+        super().__init__(-radius, -radius, 2 * radius, 2 * radius)
+        self.setBrush(QBrush(self.COLOR))
+        self.setPen(QPen(Qt.black, 1))
+        self.setZValue(7)
+        self._syncing = True
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
+        self.update_position()
+
+    def finish_init(self):
+        self._syncing = False
+
+    def update_position(self):
+        pos = self.main_window.bezier_ctrl_position(self.seg_idx, self.ctrl_idx)
+        self._syncing = True
+        self.setPos(*pos)
+        self._syncing = False
+
+    def update_radius(self):
+        r = self.main_window.point_radius
+        self.setRect(-r, -r, 2 * r, 2 * r)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemPositionChange:
+            if self._syncing:
+                return value
+            p0, p3, t0, t1 = self.main_window._bezier_endpoints(self.seg_idx)
+            base = p0 if self.ctrl_idx == 0 else p3
+            tan = t0 if self.ctrl_idx == 0 else -t1
+            vec = np.array([value.x(), value.y()]) - base
+            length = float(np.dot(vec, tan))
+            self.main_window.bezier_ctrl_lens[self.seg_idx][self.ctrl_idx] = length
+            new_pos = base + length * tan
+            self.main_window.update_after_bezier_move()
+            return QPointF(*new_pos)
+        return super().itemChange(change, value)
