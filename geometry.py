@@ -45,7 +45,7 @@ def arc_geom_points(a, b, R, *, centers=None):
 
 
 def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=None,
-                        bezier_ctrl_lens=None):
+                        bezier_ctrl_offsets=None):
     if centers is None:
         a2, b2 = a / 2.0, b / 2.0
         centers = [
@@ -79,7 +79,7 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
     ang = _arc_angles_from_centers(centers)
     arcs = [arc(cx, cy, a0, a1) for (cx, cy), (a0, a1) in zip(centers, ang)]
 
-    if bezier_ctrl_lens is None:
+    if bezier_ctrl_offsets is None:
         segs = [
             line(arcs[0][-1], arcs[1][0]),
             line(arcs[1][-1], arcs[2][0]),
@@ -91,13 +91,9 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
         for i in range(4):
             p0 = np.asarray(arcs[i][-1])
             p3 = np.asarray(arcs[(i + 1) % 4][0])
-            l1, l2 = bezier_ctrl_lens[i]
-            ang1 = ang[i][1]
-            ang0_next = ang[(i + 1) % 4][0]
-            t0 = np.array([-math.sin(ang1), math.cos(ang1)])
-            t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
-            p1 = p0 + l1 * t0
-            p2 = p3 - l2 * t1
+            v1, v2 = bezier_ctrl_offsets[i]
+            p1 = p0 + np.asarray(v1)
+            p2 = p3 + np.asarray(v2)
             segs.append(cubic(p0, p1, p2, p3))
 
     dense = np.vstack([

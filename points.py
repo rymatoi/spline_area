@@ -198,13 +198,10 @@ class BezierCtrlPoint(QGraphicsEllipseItem):
         if change == QGraphicsEllipseItem.ItemPositionChange:
             if self._syncing:
                 return value
-            p0, p3, t0, t1 = self.main_window._bezier_endpoints(self.seg_idx)
+            p0, p3, _, _ = self.main_window._bezier_endpoints(self.seg_idx)
             base = p0 if self.ctrl_idx == 0 else p3
-            tan = t0 if self.ctrl_idx == 0 else -t1
             vec = np.array([value.x(), value.y()]) - base
-            length = float(np.dot(vec, tan))
-            self.main_window.bezier_ctrl_lens[self.seg_idx][self.ctrl_idx] = length
-            new_pos = base + length * tan
+            self.main_window.bezier_ctrl_offsets[self.seg_idx][self.ctrl_idx] = vec
             self.main_window.update_after_bezier_move()
-            return QPointF(*new_pos)
+            return value
         return super().itemChange(change, value)

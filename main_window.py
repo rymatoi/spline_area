@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
         self.contour_item = None
         self.background_items = []
         self.view.viewport().installEventFilter(self)
-        self.bezier_ctrl_lens = []
+        self.bezier_ctrl_offsets = []
         self.bezier_ctrl_points = []
         self.reset_arc_centers()
         self._inspector = InspectorWidget(self)
@@ -50,17 +50,24 @@ class MainWindow(QMainWindow):
             np.array([self.a / 2 - self.R, -self.b / 2 + self.R]),
             np.array([self.a / 2 - self.R, self.b / 2 - self.R]),
         ]
-        self.compute_default_bezier_lens()
+        self.compute_default_bezier_offsets()
 
-    def compute_default_bezier_lens(self):
+    def compute_default_bezier_offsets(self):
         arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
-        self.bezier_ctrl_lens = []
+        self.bezier_ctrl_offsets = []
+        ang = _arc_angles_from_centers(self.arc_centers)
         for i in range(4):
             p0 = np.array(arcs[i][2])
             p3 = np.array(arcs[(i + 1) % 4][1])
             chord = np.linalg.norm(p3 - p0)
             d = chord / 3.0
-            self.bezier_ctrl_lens.append([d, d])
+            ang1 = ang[i][1]
+            ang0_next = ang[(i + 1) % 4][0]
+            t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+            t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+            v1 = d * t0
+            v2 = -d * t1
+            self.bezier_ctrl_offsets.append([v1, v2])
 
     def _bezier_endpoints(self, seg_idx):
         ang = _arc_angles_from_centers(self.arc_centers)
@@ -75,11 +82,11 @@ class MainWindow(QMainWindow):
 
     def bezier_ctrl_position(self, seg_idx, ctrl_idx):
         p0, p3, t0, t1 = self._bezier_endpoints(seg_idx)
-        l1, l2 = self.bezier_ctrl_lens[seg_idx]
+        v1, v2 = self.bezier_ctrl_offsets[seg_idx]
         if ctrl_idx == 0:
-            return p0 + l1 * t0
+            return p0 + v1
         else:
-            return p3 - l2 * t1
+            return p3 + v2
 
     def update_after_bezier_move(self):
         contour = self.get_contour()
@@ -181,7 +188,7 @@ class MainWindow(QMainWindow):
             self.R,
             step=self.step,
             centers=self.arc_centers,
-            bezier_ctrl_lens=self.bezier_ctrl_lens,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
         )
 
     def arc_center_indices(self, contour):
