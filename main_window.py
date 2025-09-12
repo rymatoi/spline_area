@@ -56,7 +56,13 @@ class MainWindow(QMainWindow):
         self.compute_default_bezier_offsets()
 
     def compute_default_bezier_offsets(self):
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a,
+            self.b,
+            self.R,
+            centers=self.arc_centers,
+            c1=self.c1,
+        )
         self.bezier_ctrl_offsets = []
         n = self.bezier_ctrl_count // 2
         for i in range(4):
@@ -266,9 +272,12 @@ class MainWindow(QMainWindow):
         center_xy, start_xy, end_xy = [
             np.array(p)
             for p in arc_geom_points(
-                self.a, self.b, self.R,
+                self.a,
+                self.b,
+                self.R,
                 centers=self.arc_centers,
                 bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+                c1=self.c1,
             )[arc_num]
         ]
         center_idx = np.argmin(np.linalg.norm(contour - center_xy, axis=1))
