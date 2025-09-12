@@ -207,8 +207,34 @@ def cubic_spline_closed(points: np.ndarray, samples_per_seg: int = 24) -> np.nda
     return np.column_stack([cs_x(ts_dense), cs_y(ts_dense)])
 
 
-def rounded_rect_area(a: float, b: float, R: float, *, centers=None) -> float:
-    """Exact area of the rounded figure defined by ``centers``."""
+def _cubic_area(p0, p1, p2, p3):
+    """Signed area enclosed by a cubic Bézier segment."""
+    x0, y0 = p0
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+    return 0.5 * (1 / 20) * (
+        12 * x0 * y1 + 6 * x0 * y2 + 2 * x0 * y3
+        - 12 * x1 * y0 + 6 * x1 * y2 + 6 * x1 * y3
+        - 6 * x2 * y0 - 6 * x2 * y1 + 12 * x2 * y3
+        - 2 * x3 * y0 - 6 * x3 * y1 - 12 * x3 * y2
+    )
+
+
+def rounded_rect_area(
+    a: float,
+    b: float,
+    R: float,
+    *,
+    centers=None,
+    bezier_ctrl_offsets=None,
+) -> float:
+    """Exact area of the rounded figure defined by ``centers``.
+
+    When ``bezier_ctrl_offsets`` are provided, straight edges are replaced by
+    cubic Bézier segments with the given control-point offsets, and the area
+    accounts for these curves.
+    """
     if centers is None:
         a2, b2 = a / 2, b / 2
         centers = [
@@ -217,22 +243,72 @@ def rounded_rect_area(a: float, b: float, R: float, *, centers=None) -> float:
             (a2 - R, -b2 + R),
             (a2 - R, b2 - R),
         ]
+
+    centers = [np.asarray(c, dtype=float) for c in centers]
     ang_pairs = _arc_angles_from_centers(centers)
     area = 0.0
+
+    if bezier_ctrl_offsets is None:
+        for i in range(4):
+            cx, cy = centers[i]
+            a0, a1 = ang_pairs[i]
+            area += 0.5 * (
+                R * (
+                    cx * (math.sin(a1) - math.sin(a0))
+                    - cy * (math.cos(a1) - math.cos(a0))
+                )
+                + R * R * (a1 - a0)
+            )
+            j = (i + 1) % 4
+            p1 = (cx + R * math.cos(a1), cy + R * math.sin(a1))
+            p2 = (
+                centers[j][0] + R * math.cos(ang_pairs[j][0]),
+                centers[j][1] + R * math.sin(ang_pairs[j][0]),
+            )
+            area += 0.5 * (p1[0] * p2[1] - p1[1] * p2[0])
+        return abs(area)
+
+    p0_list = []
+    p3_list = []
+    for i in range(4):
+        c0 = centers[i]
+        c1 = centers[(i + 1) % 4]
+        v1, v2 = [np.asarray(v, dtype=float) for v in bezier_ctrl_offsets[i]]
+
+        if np.linalg.norm(v1) < 1e-9:
+            ang1 = ang_pairs[i][1]
+            t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+        else:
+            t0 = v1 / np.linalg.norm(v1)
+
+        if np.linalg.norm(v2) < 1e-9:
+            ang0_next = ang_pairs[(i + 1) % 4][0]
+            t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+        else:
+            t1 = (-v2) / np.linalg.norm(v2)
+
+        p0 = c0 + R * np.array([t0[1], -t0[0]])
+        p3 = c1 + R * np.array([t1[1], -t1[0]])
+        p1 = p0 + v1
+        p2 = p3 + v2
+        p0_list.append(p0)
+        p3_list.append(p3)
+        area += _cubic_area(p0, p1, p2, p3)
+
     for i in range(4):
         cx, cy = centers[i]
-        a0, a1 = ang_pairs[i]
-        # Circular arc contribution
+        start = p3_list[i - 1]
+        end = p0_list[i]
+        a0 = math.atan2(start[1] - cy, start[0] - cx)
+        a1 = math.atan2(end[1] - cy, end[0] - cx)
+        if a1 <= a0:
+            a1 += 2 * math.pi
         area += 0.5 * (
-            R * (cx * (math.sin(a1) - math.sin(a0)) - cy * (math.cos(a1) - math.cos(a0)))
+            R * (
+                cx * (math.sin(a1) - math.sin(a0))
+                - cy * (math.cos(a1) - math.cos(a0))
+            )
             + R * R * (a1 - a0)
         )
-        j = (i + 1) % 4
-        p1 = (cx + R * math.cos(a1), cy + R * math.sin(a1))
-        p2 = (
-            centers[j][0] + R * math.cos(ang_pairs[j][0]),
-            centers[j][1] + R * math.sin(ang_pairs[j][0]),
-        )
-        # Tangent line contribution
-        area += 0.5 * (p1[0] * p2[1] - p1[1] * p2[0])
+
     return abs(area)

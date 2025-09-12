@@ -513,7 +513,13 @@ class MainWindow(QMainWindow):
 
     def theoretical_area(self):
         from geometry import rounded_rect_area
-        return rounded_rect_area(self.a, self.b, self.R, centers=self.arc_centers)
+        return rounded_rect_area(
+            self.a,
+            self.b,
+            self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+        )
 
     def area_error_percent(self):
         theory = self.theoretical_area()
