@@ -22,6 +22,7 @@ class MainWindow(QMainWindow):
         self.step = 1.0
         self.bezier_points = 200
         self.bezier_ctrl_count = 2  # control points per straight side
+        self.c1 = True
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.Antialiasing, True)
@@ -77,32 +78,42 @@ class MainWindow(QMainWindow):
         self.redraw_all(preserve_markers=True)
 
     def _bezier_line_endpoints(self, side_idx):
-        ang = _arc_angles_from_centers(self.arc_centers)
-        offs = self.bezier_ctrl_offsets[side_idx]
-        if offs:
-            v1 = np.asarray(offs[0][0], dtype=float)
-            v2 = np.asarray(offs[-1][1], dtype=float)
-        else:
-            v1 = np.zeros(2)
-            v2 = np.zeros(2)
-        c0 = np.asarray(self.arc_centers[side_idx], dtype=float)
-        c1 = np.asarray(self.arc_centers[(side_idx + 1) % 4], dtype=float)
+        if self.c1:
+            ang = _arc_angles_from_centers(self.arc_centers)
+            offs = self.bezier_ctrl_offsets[side_idx]
+            if offs:
+                v1 = np.asarray(offs[0][0], dtype=float)
+                v2 = np.asarray(offs[-1][1], dtype=float)
+            else:
+                v1 = np.zeros(2)
+                v2 = np.zeros(2)
+            c0 = np.asarray(self.arc_centers[side_idx], dtype=float)
+            c1c = np.asarray(self.arc_centers[(side_idx + 1) % 4], dtype=float)
 
-        if np.linalg.norm(v1) < 1e-9:
-            ang1 = ang[side_idx][1]
-            t0 = np.array([-math.sin(ang1), math.cos(ang1)])
-        else:
-            t0 = v1 / np.linalg.norm(v1)
+            if np.linalg.norm(v1) < 1e-9:
+                ang1 = ang[side_idx][1]
+                t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+            else:
+                t0 = v1 / np.linalg.norm(v1)
 
-        if np.linalg.norm(v2) < 1e-9:
-            ang0_next = ang[(side_idx + 1) % 4][0]
-            t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
-        else:
-            t1 = (-v2) / np.linalg.norm(v2)
+            if np.linalg.norm(v2) < 1e-9:
+                ang0_next = ang[(side_idx + 1) % 4][0]
+                t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+            else:
+                t1 = (-v2) / np.linalg.norm(v2)
 
-        p0 = c0 + self.R * np.array([t0[1], -t0[0]])
-        p3 = c1 + self.R * np.array([t1[1], -t1[0]])
-        return p0, p3
+            p0 = c0 + self.R * np.array([t0[1], -t0[0]])
+            p3 = c1c + self.R * np.array([t1[1], -t1[0]])
+            return p0, p3
+        else:
+            arcs = arc_geom_points(
+                self.a, self.b, self.R,
+                centers=self.arc_centers,
+                c1=False,
+            )
+            p0 = np.array(arcs[side_idx][2])
+            p3 = np.array(arcs[(side_idx + 1) % 4][1])
+            return p0, p3
 
     def bezier_ctrl_position(self, side_idx, seg_idx, ctrl_idx):
         p0, p3 = self._bezier_line_endpoints(side_idx)
@@ -217,6 +228,7 @@ class MainWindow(QMainWindow):
             n_line=self.bezier_points,
             centers=self.arc_centers,
             bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
         )
 
     def arc_center_indices(self, contour):
@@ -224,6 +236,7 @@ class MainWindow(QMainWindow):
             self.a, self.b, self.R,
             centers=self.arc_centers,
             bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
         )
         centers_geom = [arc[0] for arc in arcs]
         return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
@@ -438,6 +451,7 @@ class MainWindow(QMainWindow):
             self.a, self.b, self.R,
             centers=self.arc_centers,
             bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
         )
         arc_info = [
             (self.arc_centers[i][0], self.arc_centers[i][1], arcs[i][1], arcs[i][2])
@@ -541,6 +555,7 @@ class MainWindow(QMainWindow):
             self.R,
             centers=self.arc_centers,
             bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
         )
 
     def area_error_percent(self):
@@ -564,6 +579,7 @@ class MainWindow(QMainWindow):
             self.a, self.b, self.R,
             centers=self.arc_centers,
             bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
         )
         line_meta = []
         for i in range(4):

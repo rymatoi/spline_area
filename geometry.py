@@ -22,13 +22,14 @@ def _arc_angles_from_centers(centers):
     return ang_pairs
 
 
-def arc_geom_points(a, b, R, *, centers=None, bezier_ctrl_offsets=None):
+def arc_geom_points(a, b, R, *, centers=None, bezier_ctrl_offsets=None, c1=True):
     """Return (arc_mid, start, end) tuples for each corner arc.
 
-    If ``bezier_ctrl_offsets`` are provided, arc endpoints are chosen so that
-    the circular arcs remain tangent to the adjacent Bézier segments.  This
-    keeps ``C1`` continuity at the junctions even when the handles are moved
-    freely.
+    When ``c1`` is ``True`` and ``bezier_ctrl_offsets`` are provided, arc
+    endpoints are chosen so the circular arcs remain tangent to the adjacent
+    Bézier segments (``C1`` continuity).  If ``c1`` is ``False``, offsets are
+    ignored and the arcs are taken from the fixed rectangle geometry
+    (``C0`` continuity).
     """
     if centers is None:
         a2, b2 = a / 2, b / 2
@@ -42,7 +43,7 @@ def arc_geom_points(a, b, R, *, centers=None, bezier_ctrl_offsets=None):
 
     ang_pairs = _arc_angles_from_centers(centers)
 
-    if bezier_ctrl_offsets is None:
+    if (not c1) or bezier_ctrl_offsets is None:
         arcs = []
         for (cx, cy), (a0, a1) in zip(centers, ang_pairs):
             amid = (a0 + a1) / 2
@@ -52,12 +53,12 @@ def arc_geom_points(a, b, R, *, centers=None, bezier_ctrl_offsets=None):
             arcs.append((mid, start, end))
         return arcs
 
-    # When offsets are supplied, arc endpoints depend on the Bézier tangents.
-    # ``bezier_ctrl_offsets`` is a list of four elements, one per straight
-    # segment.  Each element contains a list of ``(v1, v2)`` offset pairs for
-    # the cubic sub-segments that replace the original straight edge.  Only the
-    # first pair's ``v1`` and the last pair's ``v2`` influence the tangents for
-    # the adjoining circular arcs.
+    # When offsets are supplied and ``c1`` is True, arc endpoints depend on the
+    # Bézier tangents.  ``bezier_ctrl_offsets`` is a list of four elements, one
+    # per straight segment.  Each element contains a list of ``(v1, v2)``
+    # offset pairs for the cubic sub-segments that replace the original
+    # straight edge.  Only the first pair's ``v1`` and the last pair's ``v2``
+    # influence the tangents for the adjoining circular arcs.
     p0_list, p3_list = [], []
     for i in range(4):
         c0 = centers[i]
@@ -103,7 +104,7 @@ def arc_geom_points(a, b, R, *, centers=None, bezier_ctrl_offsets=None):
 
 
 def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=None,
-                        bezier_ctrl_offsets=None):
+                        bezier_ctrl_offsets=None, c1=True):
     if centers is None:
         a2, b2 = a / 2.0, b / 2.0
         centers = [
@@ -156,7 +157,7 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
             [line(arcs[2][-1], arcs[3][0])],
             [line(arcs[3][-1], arcs[0][0])],
         ]
-    else:
+    elif c1:
         p0_list, p3_list, segs = [], [], []
         for i in range(4):
             c0 = centers[i]
@@ -206,6 +207,29 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
             start = p3_list[i - 1]
             end = p0_list[i]
             arcs.append(arc_from_points(cx, cy, start, end))
+    else:
+        arcs = [
+            arc_from_angles(cx, cy, a0, a1)
+            for (cx, cy), (a0, a1) in zip(centers, ang_pairs)
+        ]
+        segs = []
+        for i in range(4):
+            p0 = arcs[i][2]
+            p3 = arcs[(i + 1) % 4][1]
+            offs = bezier_ctrl_offsets[i]
+            if offs:
+                k = len(offs)
+                line_vec = p3 - p0
+                segs_i = []
+                for j, (vv1, vv2) in enumerate(offs):
+                    start = p0 + line_vec * (j / k)
+                    end = p0 + line_vec * ((j + 1) / k)
+                    p1 = start + np.asarray(vv1, dtype=float)
+                    p2 = end + np.asarray(vv2, dtype=float)
+                    segs_i.append(cubic(start, p1, p2, end))
+                segs.append(segs_i)
+            else:
+                segs.append([line(p0, p3)])
 
     dense = np.vstack([
         arcs[0], *segs[0],
@@ -255,6 +279,7 @@ def rounded_rect_area(
     *,
     centers=None,
     bezier_ctrl_offsets=None,
+    c1: bool = True,
 ) -> float:
     """Exact area of the rounded figure defined by ``centers``.
 
@@ -295,62 +320,77 @@ def rounded_rect_area(
             area += 0.5 * (p1[0] * p2[1] - p1[1] * p2[0])
         return abs(area)
 
-    p0_list = []
-    p3_list = []
-    for i in range(4):
-        c0 = centers[i]
-        c1 = centers[(i + 1) % 4]
-        offs = bezier_ctrl_offsets[i]
-        if offs:
-            v1 = np.asarray(offs[0][0], dtype=float)
-            v2 = np.asarray(offs[-1][1], dtype=float)
-        else:
-            v1 = np.zeros(2)
-            v2 = np.zeros(2)
+    if c1:
+        p0_list = []
+        p3_list = []
+        for i in range(4):
+            c0 = centers[i]
+            c1c = centers[(i + 1) % 4]
+            offs = bezier_ctrl_offsets[i]
+            if offs:
+                v1 = np.asarray(offs[0][0], dtype=float)
+                v2 = np.asarray(offs[-1][1], dtype=float)
+            else:
+                v1 = np.zeros(2)
+                v2 = np.zeros(2)
 
-        if np.linalg.norm(v1) < 1e-9:
-            ang1 = ang_pairs[i][1]
-            t0 = np.array([-math.sin(ang1), math.cos(ang1)])
-        else:
-            t0 = v1 / np.linalg.norm(v1)
+            if np.linalg.norm(v1) < 1e-9:
+                ang1 = ang_pairs[i][1]
+                t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+            else:
+                t0 = v1 / np.linalg.norm(v1)
 
-        if np.linalg.norm(v2) < 1e-9:
-            ang0_next = ang_pairs[(i + 1) % 4][0]
-            t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
-        else:
-            t1 = (-v2) / np.linalg.norm(v2)
+            if np.linalg.norm(v2) < 1e-9:
+                ang0_next = ang_pairs[(i + 1) % 4][0]
+                t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+            else:
+                t1 = (-v2) / np.linalg.norm(v2)
 
-        p0 = c0 + R * np.array([t0[1], -t0[0]])
-        p3 = c1 + R * np.array([t1[1], -t1[0]])
-        p0_list.append(p0)
-        p3_list.append(p3)
+            p0 = c0 + R * np.array([t0[1], -t0[0]])
+            p3 = c1c + R * np.array([t1[1], -t1[0]])
+            p0_list.append(p0)
+            p3_list.append(p3)
 
-        if offs:
-            k = len(offs)
-            line_vec = p3 - p0
-            for j, (vv1, vv2) in enumerate(offs):
-                start = p0 + line_vec * (j / k)
-                end = p0 + line_vec * ((j + 1) / k)
-                p1 = start + np.asarray(vv1, dtype=float)
-                p2 = end + np.asarray(vv2, dtype=float)
-                area += _cubic_area(start, p1, p2, end)
-        else:
-            area += 0.5 * (p0[0] * p3[1] - p0[1] * p3[0])
+            if offs:
+                k = len(offs)
+                line_vec = p3 - p0
+                for j, (vv1, vv2) in enumerate(offs):
+                    start = p0 + line_vec * (j / k)
+                    end = p0 + line_vec * ((j + 1) / k)
+                    p1 = start + np.asarray(vv1, dtype=float)
+                    p2 = end + np.asarray(vv2, dtype=float)
+                    area += _cubic_area(start, p1, p2, end)
+            else:
+                area += 0.5 * (p0[0] * p3[1] - p0[1] * p3[0])
 
-    for i in range(4):
-        cx, cy = centers[i]
-        start = p3_list[i - 1]
-        end = p0_list[i]
-        a0 = math.atan2(start[1] - cy, start[0] - cx)
-        a1 = math.atan2(end[1] - cy, end[0] - cx)
-        if a1 <= a0:
-            a1 += 2 * math.pi
-        area += 0.5 * (
-            R * (
-                cx * (math.sin(a1) - math.sin(a0))
-                - cy * (math.cos(a1) - math.cos(a0))
+        for i in range(4):
+            cx, cy = centers[i]
+            start = p3_list[i - 1]
+            end = p0_list[i]
+            a0 = math.atan2(start[1] - cy, start[0] - cx)
+            a1 = math.atan2(end[1] - cy, end[0] - cx)
+            if a1 <= a0:
+                a1 += 2 * math.pi
+            area += 0.5 * (
+                R * (
+                    cx * (math.sin(a1) - math.sin(a0))
+                    - cy * (math.cos(a1) - math.cos(a0))
+                )
+                + R * R * (a1 - a0)
             )
-            + R * R * (a1 - a0)
-        )
+        return abs(area)
 
-    return abs(area)
+    # For C0 continuity the arcs do not adjust to Bézier handles.  Computing an
+    # analytic area becomes cumbersome, so fall back to a dense polygon
+    # approximation of the contour.
+    pts = rounded_rect_points(
+        a,
+        b,
+        R,
+        step=0.1,
+        centers=centers,
+        bezier_ctrl_offsets=bezier_ctrl_offsets,
+        c1=False,
+    )
+    x, y = pts[:, 0], pts[:, 1]
+    return 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
