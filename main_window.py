@@ -71,13 +71,24 @@ class MainWindow(QMainWindow):
 
     def _bezier_endpoints(self, seg_idx):
         ang = _arc_angles_from_centers(self.arc_centers)
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
-        p0 = np.array(arcs[seg_idx][2])
-        p3 = np.array(arcs[(seg_idx + 1) % 4][1])
-        ang1 = ang[seg_idx][1]
-        ang0_next = ang[(seg_idx + 1) % 4][0]
-        t0 = np.array([-math.sin(ang1), math.cos(ang1)])
-        t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+        v1, v2 = [np.asarray(v, dtype=float) for v in self.bezier_ctrl_offsets[seg_idx]]
+        c0 = np.asarray(self.arc_centers[seg_idx], dtype=float)
+        c1 = np.asarray(self.arc_centers[(seg_idx + 1) % 4], dtype=float)
+
+        if np.linalg.norm(v1) < 1e-9:
+            ang1 = ang[seg_idx][1]
+            t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+        else:
+            t0 = v1 / np.linalg.norm(v1)
+
+        if np.linalg.norm(v2) < 1e-9:
+            ang0_next = ang[(seg_idx + 1) % 4][0]
+            t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+        else:
+            t1 = (-v2) / np.linalg.norm(v2)
+
+        p0 = c0 + self.R * np.array([t0[1], -t0[0]])
+        p3 = c1 + self.R * np.array([t1[1], -t1[0]])
         return p0, p3, t0, t1
 
     def bezier_ctrl_position(self, seg_idx, ctrl_idx):
@@ -192,7 +203,11 @@ class MainWindow(QMainWindow):
         )
 
     def arc_center_indices(self, contour):
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a, self.b, self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+        )
         centers_geom = [arc[0] for arc in arcs]
         return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
 
@@ -217,7 +232,14 @@ class MainWindow(QMainWindow):
         self._prev_contour = contour.copy()
 
     def _marker_position_for_offset(self, contour, _, offset, offsets, arc_num):
-        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)[arc_num]]
+        center_xy, start_xy, end_xy = [
+            np.array(p)
+            for p in arc_geom_points(
+                self.a, self.b, self.R,
+                centers=self.arc_centers,
+                bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            )[arc_num]
+        ]
         center_idx = np.argmin(np.linalg.norm(contour - center_xy, axis=1))
         start_idx = np.argmin(np.linalg.norm(contour - start_xy, axis=1))
         end_idx = np.argmin(np.linalg.norm(contour - end_xy, axis=1))
@@ -390,7 +412,11 @@ class MainWindow(QMainWindow):
         add_text("-a", -a2 - 22, 2)
         add_text(" b", 4, b2 - 14)
         add_text("-b", 4, -b2 - 18)
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a, self.b, self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+        )
         arc_info = [
             (self.arc_centers[i][0], self.arc_centers[i][1], arcs[i][1], arcs[i][2])
             for i in range(4)
@@ -506,7 +532,11 @@ class MainWindow(QMainWindow):
         N = len(contour)
 
         # Determine metadata for the four straight segments
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a, self.b, self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+        )
         line_meta = []
         for i in range(4):
             start_pt = np.array(arcs[i][2])
