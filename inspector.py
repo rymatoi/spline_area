@@ -19,6 +19,7 @@ class InspectorWidget(QWidget):
         self.R = self._add_dspinbox("R (радиус скругления)", 1, 1000, main_window.R, self._change_R)
         self.scale = self._add_dspinbox("Масштаб", 0.1, 4.0, main_window.scale, self._change_scale, decimals=2, step=0.05)
         self.step = self._add_dspinbox("Шаг дискретизации", 0.1, 100, main_window.step, self._change_step, decimals=2, step=0.1)
+        self.bezier_pts = self._add_spinbox("Точек на Безье", 4, 2000, main_window.bezier_points, self._change_bezier_pts)
         self.layout.addRow(QLabel("<b>Визуализация</b>"))
         self.point_radius = self._add_spinbox("Размер точек", 1, 50, main_window.point_radius, self._change_point_radius)
         self.line_width = self._add_spinbox("Толщина линий", 1, 15, main_window.line_width, self._change_line_width)
@@ -98,6 +99,11 @@ class InspectorWidget(QWidget):
 
     def _change_step(self, v):
         self.main_window.step = v
+        self.main_window.redraw_all(preserve_markers=True)
+        self.update_error()
+
+    def _change_bezier_pts(self, v):
+        self.main_window.bezier_points = v
         self.main_window.redraw_all(preserve_markers=True)
         self.update_error()
 

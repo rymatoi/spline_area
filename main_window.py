@@ -20,6 +20,7 @@ class MainWindow(QMainWindow):
         self.point_radius = 7
         self.line_width = 3
         self.step = 1.0
+        self.bezier_points = 200
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.Antialiasing, True)
@@ -198,6 +199,7 @@ class MainWindow(QMainWindow):
             self.b,
             self.R,
             step=self.step,
+            n_line=self.bezier_points,
             centers=self.arc_centers,
             bezier_ctrl_offsets=self.bezier_ctrl_offsets,
         )
