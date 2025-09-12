@@ -162,3 +162,53 @@ class CenterPoint(QGraphicsEllipseItem):
             self.main_window.move_center(self.index, pos)
             return QPointF(*self.main_window.arc_centers[self.index])
         return super().itemChange(change, value)
+
+
+class BezierCtrlPoint(QGraphicsEllipseItem):
+    COLOR = QColor(200, 200, 0)
+
+    def __init__(self, main_window, side_idx, seg_idx, ctrl_idx):
+        self.main_window = main_window
+        self.side_idx = side_idx
+        self.seg_idx = seg_idx
+        self.ctrl_idx = ctrl_idx
+        radius = main_window.point_radius
+        super().__init__(-radius, -radius, 2 * radius, 2 * radius)
+        self.setBrush(QBrush(self.COLOR))
+        self.setPen(QPen(Qt.black, 1))
+        self.setZValue(7)
+        self._syncing = True
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
+        self.update_position()
+
+    def finish_init(self):
+        self._syncing = False
+
+    def update_position(self):
+        pos = self.main_window.bezier_ctrl_position(
+            self.side_idx, self.seg_idx, self.ctrl_idx
+        )
+        self._syncing = True
+        self.setPos(*pos)
+        self._syncing = False
+
+    def update_radius(self):
+        r = self.main_window.point_radius
+        self.setRect(-r, -r, 2 * r, 2 * r)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemPositionChange:
+            if self._syncing:
+                return value
+            p0, p3 = self.main_window._bezier_line_endpoints(self.side_idx)
+            n = self.main_window.bezier_ctrl_count // 2
+            line_vec = p3 - p0
+            start = p0 + line_vec * (self.seg_idx / n)
+            end = p0 + line_vec * ((self.seg_idx + 1) / n)
+            base = start if self.ctrl_idx == 0 else end
+            vec = np.array([value.x(), value.y()]) - base
+            self.main_window.bezier_ctrl_offsets[self.side_idx][self.seg_idx][self.ctrl_idx] = vec
+            self.main_window.update_after_bezier_move()
+            return value
+        return super().itemChange(change, value)

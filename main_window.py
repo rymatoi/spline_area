@@ -4,10 +4,10 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform, QPainter
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
-from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
+from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed, _arc_angles_from_centers
 from scipy.interpolate import CubicSpline
 from scipy.optimize import minimize
-from points import GroupOfPoints, FreePoint, CenterPoint
+from points import GroupOfPoints, FreePoint, CenterPoint, BezierCtrlPoint
 from inspector import InspectorWidget
 
 
@@ -20,6 +20,9 @@ class MainWindow(QMainWindow):
         self.point_radius = 7
         self.line_width = 3
         self.step = 1.0
+        self.bezier_points = 200
+        self.bezier_ctrl_count = 2  # control points per straight side
+        self.c1 = True
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.Antialiasing, True)
@@ -30,6 +33,8 @@ class MainWindow(QMainWindow):
         self.contour_item = None
         self.background_items = []
         self.view.viewport().installEventFilter(self)
+        self.bezier_ctrl_offsets = []
+        self.bezier_ctrl_points = []
         self.reset_arc_centers()
         self._inspector = InspectorWidget(self)
         dock = QDockWidget("Параметры", self)
@@ -48,12 +53,108 @@ class MainWindow(QMainWindow):
             np.array([self.a / 2 - self.R, -self.b / 2 + self.R]),
             np.array([self.a / 2 - self.R, self.b / 2 - self.R]),
         ]
+        self.compute_default_bezier_offsets()
+
+    def compute_default_bezier_offsets(self):
+        arcs = arc_geom_points(
+            self.a,
+            self.b,
+            self.R,
+            centers=self.arc_centers,
+            c1=self.c1,
+        )
+        self.bezier_ctrl_offsets = []
+        n = self.bezier_ctrl_count // 2
+        for i in range(4):
+            p0 = np.array(arcs[i][2])
+            p3 = np.array(arcs[(i + 1) % 4][1])
+            if n == 0:
+                self.bezier_ctrl_offsets.append([])
+                continue
+            chord = np.linalg.norm(p3 - p0)
+            dir_vec = (p3 - p0) / chord if chord > 1e-9 else np.array([1.0, 0.0])
+            seg_len = chord / n
+            v = (seg_len / 3.0) * dir_vec
+            offs = [[v, -v] for _ in range(n)]
+            self.bezier_ctrl_offsets.append(offs)
+
+    def change_bezier_ctrl_count(self, v):
+        self.bezier_ctrl_count = v
+        self.compute_default_bezier_offsets()
+        self.redraw_all(preserve_markers=True)
+
+    def _bezier_line_endpoints(self, side_idx):
+        if self.c1:
+            ang = _arc_angles_from_centers(self.arc_centers)
+            offs = self.bezier_ctrl_offsets[side_idx]
+            if offs:
+                v1 = np.asarray(offs[0][0], dtype=float)
+                v2 = np.asarray(offs[-1][1], dtype=float)
+            else:
+                v1 = np.zeros(2)
+                v2 = np.zeros(2)
+            c0 = np.asarray(self.arc_centers[side_idx], dtype=float)
+            c1c = np.asarray(self.arc_centers[(side_idx + 1) % 4], dtype=float)
+
+            if np.linalg.norm(v1) < 1e-9:
+                ang1 = ang[side_idx][1]
+                t0 = np.array([-math.sin(ang1), math.cos(ang1)])
+            else:
+                t0 = v1 / np.linalg.norm(v1)
+
+            if np.linalg.norm(v2) < 1e-9:
+                ang0_next = ang[(side_idx + 1) % 4][0]
+                t1 = np.array([-math.sin(ang0_next), math.cos(ang0_next)])
+            else:
+                t1 = (-v2) / np.linalg.norm(v2)
+
+            p0 = c0 + self.R * np.array([t0[1], -t0[0]])
+            p3 = c1c + self.R * np.array([t1[1], -t1[0]])
+            return p0, p3
+        else:
+            arcs = arc_geom_points(
+                self.a, self.b, self.R,
+                centers=self.arc_centers,
+                c1=False,
+            )
+            p0 = np.array(arcs[side_idx][2])
+            p3 = np.array(arcs[(side_idx + 1) % 4][1])
+            return p0, p3
+
+    def bezier_ctrl_position(self, side_idx, seg_idx, ctrl_idx):
+        p0, p3 = self._bezier_line_endpoints(side_idx)
+        n = self.bezier_ctrl_count // 2
+        line_vec = p3 - p0
+        start = p0 + line_vec * (seg_idx / n)
+        end = p0 + line_vec * ((seg_idx + 1) / n)
+        v1, v2 = self.bezier_ctrl_offsets[side_idx][seg_idx]
+        return (start + v1) if ctrl_idx == 0 else (end + v2)
+
+    def update_after_bezier_move(self):
+        contour = self.get_contour()
+        for grp in self.groups:
+            grp.update_positions(contour)
+        for fp in self.free_points:
+            fp.update_position()
+        for side in self.bezier_ctrl_points:
+            for pair in side:
+                for cp in pair:
+                    if not cp._syncing:
+                        cp.update_position()
+        self._draw_background(contour)
+        self._draw_contour(contour)
+        self._draw_spline()
+        self._prev_contour = contour.copy()
 
     def update_free_points_radius(self):
         for fp in self.free_points:
             fp.update_radius()
         for cp in self.center_points:
             cp.update_radius()
+        for side in self.bezier_ctrl_points:
+            for pair in side:
+                for bp in pair:
+                    bp.update_radius()
 
     def move_center(self, index, pos):
         """Update a circle center and redraw geometry immediately."""
@@ -130,11 +231,19 @@ class MainWindow(QMainWindow):
             self.b,
             self.R,
             step=self.step,
+            n_line=self.bezier_points,
             centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
         )
 
     def arc_center_indices(self, contour):
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a, self.b, self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
+        )
         centers_geom = [arc[0] for arc in arcs]
         return [int(np.argmin(np.linalg.norm(contour - np.array(pt), axis=1))) for pt in centers_geom]
 
@@ -150,13 +259,27 @@ class MainWindow(QMainWindow):
         for cp in self.center_points:
             if not cp._syncing:
                 cp.update_position()
+        for side in self.bezier_ctrl_points:
+            for pair in side:
+                for bp in pair:
+                    bp.update_position()
         self._draw_background(contour)
         self._draw_contour(contour)
         self._draw_spline()
         self._prev_contour = contour.copy()
 
     def _marker_position_for_offset(self, contour, _, offset, offsets, arc_num):
-        center_xy, start_xy, end_xy = [np.array(p) for p in arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)[arc_num]]
+        center_xy, start_xy, end_xy = [
+            np.array(p)
+            for p in arc_geom_points(
+                self.a,
+                self.b,
+                self.R,
+                centers=self.arc_centers,
+                bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+                c1=self.c1,
+            )[arc_num]
+        ]
         center_idx = np.argmin(np.linalg.norm(contour - center_xy, axis=1))
         start_idx = np.argmin(np.linalg.norm(contour - start_xy, axis=1))
         end_idx = np.argmin(np.linalg.norm(contour - end_xy, axis=1))
@@ -236,6 +359,20 @@ class MainWindow(QMainWindow):
             self.scene.addItem(cp)
             cp.finish_init()
             self.center_points.append(cp)
+
+        self.bezier_ctrl_points = []
+        n = self.bezier_ctrl_count // 2
+        for i in range(4):
+            side_pts = []
+            for j in range(n):
+                cp1 = BezierCtrlPoint(self, i, j, 0)
+                cp2 = BezierCtrlPoint(self, i, j, 1)
+                self.scene.addItem(cp1)
+                self.scene.addItem(cp2)
+                cp1.finish_init()
+                cp2.finish_init()
+                side_pts.append((cp1, cp2))
+            self.bezier_ctrl_points.append(side_pts)
 
         self._prev_contour = contour.copy()
         self._draw_background(contour)
@@ -319,7 +456,12 @@ class MainWindow(QMainWindow):
         add_text("-a", -a2 - 22, 2)
         add_text(" b", 4, b2 - 14)
         add_text("-b", 4, -b2 - 18)
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a, self.b, self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
+        )
         arc_info = [
             (self.arc_centers[i][0], self.arc_centers[i][1], arcs[i][1], arcs[i][2])
             for i in range(4)
@@ -416,7 +558,14 @@ class MainWindow(QMainWindow):
 
     def theoretical_area(self):
         from geometry import rounded_rect_area
-        return rounded_rect_area(self.a, self.b, self.R, centers=self.arc_centers)
+        return rounded_rect_area(
+            self.a,
+            self.b,
+            self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
+        )
 
     def area_error_percent(self):
         theory = self.theoretical_area()
@@ -435,7 +584,12 @@ class MainWindow(QMainWindow):
         N = len(contour)
 
         # Determine metadata for the four straight segments
-        arcs = arc_geom_points(self.a, self.b, self.R, centers=self.arc_centers)
+        arcs = arc_geom_points(
+            self.a, self.b, self.R,
+            centers=self.arc_centers,
+            bezier_ctrl_offsets=self.bezier_ctrl_offsets,
+            c1=self.c1,
+        )
         line_meta = []
         for i in range(4):
             start_pt = np.array(arcs[i][2])

@@ -96,3 +96,73 @@ def test_area_changes_with_moved_centers():
     centers[0] = (centers[0][0] - 30, centers[0][1] + 15)
     changed = rounded_rect_area(a, b, R, centers=centers)
     assert not np.isclose(changed, default_area)
+
+
+def test_area_matches_sampling_with_bezier_segments():
+    a, b, R = 200, 100, 20
+    centers = default_centers(a, b, R)
+    offsets = [
+        [[(30, 0), (30, 0)]],
+        [],
+        [],
+        [],
+    ]
+    exact = rounded_rect_area(a, b, R, centers=centers, bezier_ctrl_offsets=offsets)
+    pts = rounded_rect_points(
+        a, b, R, step=0.2, centers=centers, bezier_ctrl_offsets=offsets
+    )
+    x, y = pts[:, 0], pts[:, 1]
+    sample = 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    assert np.isclose(exact, sample, rtol=1e-2)
+    default_area = rounded_rect_area(a, b, R, centers=centers)
+    assert not np.isclose(exact, default_area)
+
+
+def test_multiple_control_points_match_straight_area():
+    a, b, R = 200, 100, 20
+    centers = default_centers(a, b, R)
+    offsets = [
+        [[(0, 0), (0, 0)], [(0, 0), (0, 0)]],
+        [],
+        [],
+        [],
+    ]
+    area_multi = rounded_rect_area(a, b, R, centers=centers, bezier_ctrl_offsets=offsets)
+    area_default = rounded_rect_area(a, b, R, centers=centers)
+    assert np.isclose(area_multi, area_default)
+
+
+def test_c0_continuity_and_area():
+    a, b, R = 200, 100, 20
+    centers = default_centers(a, b, R)
+    offsets = [
+        [[(30, 0), (30, 0)]],
+        [],
+        [],
+        [],
+    ]
+    arcs_default = arc_geom_points(a, b, R, centers=centers)
+    arcs_c0 = arc_geom_points(
+        a, b, R, centers=centers, bezier_ctrl_offsets=offsets, c1=False
+    )
+    arcs_c1 = arc_geom_points(
+        a, b, R, centers=centers, bezier_ctrl_offsets=offsets, c1=True
+    )
+    for ad, ac0 in zip(arcs_default, arcs_c0):
+        assert np.allclose(ad[1], ac0[1])
+        assert np.allclose(ad[2], ac0[2])
+    assert not np.allclose(arcs_c1[0][2], arcs_default[0][2])
+
+    exact = rounded_rect_area(
+        a, b, R, centers=centers, bezier_ctrl_offsets=offsets, c1=False
+    )
+    pts = rounded_rect_points(
+        a, b, R, step=0.2, centers=centers, bezier_ctrl_offsets=offsets, c1=False
+    )
+    x, y = pts[:, 0], pts[:, 1]
+    sample = 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    assert np.isclose(exact, sample, rtol=1e-2)
+    c1_area = rounded_rect_area(
+        a, b, R, centers=centers, bezier_ctrl_offsets=offsets, c1=True
+    )
+    assert not np.isclose(exact, c1_area)
