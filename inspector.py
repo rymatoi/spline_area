@@ -20,6 +20,7 @@ class InspectorWidget(QWidget):
         self.scale = self._add_dspinbox("Масштаб", 0.1, 4.0, main_window.scale, self._change_scale, decimals=2, step=0.05)
         self.step = self._add_dspinbox("Шаг дискретизации", 0.1, 100, main_window.step, self._change_step, decimals=2, step=0.1)
         self.bezier_pts = self._add_spinbox("Точек на Безье", 4, 2000, main_window.bezier_points, self._change_bezier_pts)
+        self.bezier_ctrls = self._add_spinbox("Контрольные точки", 0, 20, main_window.bezier_ctrl_count, self._change_bezier_ctrls, step=2)
         self.layout.addRow(QLabel("<b>Визуализация</b>"))
         self.point_radius = self._add_spinbox("Размер точек", 1, 50, main_window.point_radius, self._change_point_radius)
         self.line_width = self._add_spinbox("Толщина линий", 1, 15, main_window.line_width, self._change_line_width)
@@ -55,9 +56,10 @@ class InspectorWidget(QWidget):
         self.layout.addRow(label, w)
         return w
 
-    def _add_spinbox(self, label, mn, mx, val, slot):
+    def _add_spinbox(self, label, mn, mx, val, slot, step=1):
         w = QSpinBox()
         w.setRange(mn, mx)
+        w.setSingleStep(step)
         w.setValue(val)
         w.valueChanged.connect(slot)
         self.layout.addRow(label, w)
@@ -105,6 +107,10 @@ class InspectorWidget(QWidget):
     def _change_bezier_pts(self, v):
         self.main_window.bezier_points = v
         self.main_window.redraw_all(preserve_markers=True)
+        self.update_error()
+
+    def _change_bezier_ctrls(self, v):
+        self.main_window.change_bezier_ctrl_count(v)
         self.update_error()
 
     def _optimize(self):

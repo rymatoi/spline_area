@@ -102,10 +102,10 @@ def test_area_matches_sampling_with_bezier_segments():
     a, b, R = 200, 100, 20
     centers = default_centers(a, b, R)
     offsets = [
-        [(30, 0), (30, 0)],
-        [(0, 0), (0, 0)],
-        [(0, 0), (0, 0)],
-        [(0, 0), (0, 0)],
+        [[(30, 0), (30, 0)]],
+        [],
+        [],
+        [],
     ]
     exact = rounded_rect_area(a, b, R, centers=centers, bezier_ctrl_offsets=offsets)
     pts = rounded_rect_points(
@@ -116,3 +116,17 @@ def test_area_matches_sampling_with_bezier_segments():
     assert np.isclose(exact, sample, rtol=1e-2)
     default_area = rounded_rect_area(a, b, R, centers=centers)
     assert not np.isclose(exact, default_area)
+
+
+def test_multiple_control_points_match_straight_area():
+    a, b, R = 200, 100, 20
+    centers = default_centers(a, b, R)
+    offsets = [
+        [[(0, 0), (0, 0)], [(0, 0), (0, 0)]],
+        [],
+        [],
+        [],
+    ]
+    area_multi = rounded_rect_area(a, b, R, centers=centers, bezier_ctrl_offsets=offsets)
+    area_default = rounded_rect_area(a, b, R, centers=centers)
+    assert np.isclose(area_multi, area_default)

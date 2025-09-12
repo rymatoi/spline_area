@@ -53,12 +53,22 @@ def arc_geom_points(a, b, R, *, centers=None, bezier_ctrl_offsets=None):
         return arcs
 
     # When offsets are supplied, arc endpoints depend on the Bézier tangents.
-    # Compute the Bézier endpoints first to determine arc start and end.
+    # ``bezier_ctrl_offsets`` is a list of four elements, one per straight
+    # segment.  Each element contains a list of ``(v1, v2)`` offset pairs for
+    # the cubic sub-segments that replace the original straight edge.  Only the
+    # first pair's ``v1`` and the last pair's ``v2`` influence the tangents for
+    # the adjoining circular arcs.
     p0_list, p3_list = [], []
     for i in range(4):
         c0 = centers[i]
         c1 = centers[(i + 1) % 4]
-        v1, v2 = [np.asarray(v, dtype=float) for v in bezier_ctrl_offsets[i]]
+        offs = bezier_ctrl_offsets[i]
+        if offs:
+            v1 = np.asarray(offs[0][0], dtype=float)
+            v2 = np.asarray(offs[-1][1], dtype=float)
+        else:
+            v1 = np.zeros(2)
+            v2 = np.zeros(2)
 
         if np.linalg.norm(v1) < 1e-9:
             ang1 = ang_pairs[i][1]
@@ -141,17 +151,23 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
             for (cx, cy), (a0, a1) in zip(centers, ang_pairs)
         ]
         segs = [
-            line(arcs[0][-1], arcs[1][0]),
-            line(arcs[1][-1], arcs[2][0]),
-            line(arcs[2][-1], arcs[3][0]),
-            line(arcs[3][-1], arcs[0][0]),
+            [line(arcs[0][-1], arcs[1][0])],
+            [line(arcs[1][-1], arcs[2][0])],
+            [line(arcs[2][-1], arcs[3][0])],
+            [line(arcs[3][-1], arcs[0][0])],
         ]
     else:
         p0_list, p3_list, segs = [], [], []
         for i in range(4):
             c0 = centers[i]
             c1 = centers[(i + 1) % 4]
-            v1, v2 = [np.asarray(v, dtype=float) for v in bezier_ctrl_offsets[i]]
+            offs = bezier_ctrl_offsets[i]
+            if offs:
+                v1 = np.asarray(offs[0][0], dtype=float)
+                v2 = np.asarray(offs[-1][1], dtype=float)
+            else:
+                v1 = np.zeros(2)
+                v2 = np.zeros(2)
 
             if np.linalg.norm(v1) < 1e-9:
                 ang1 = ang_pairs[i][1]
@@ -167,11 +183,22 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
 
             p0 = c0 + R * np.array([t0[1], -t0[0]])
             p3 = c1 + R * np.array([t1[1], -t1[0]])
-            p1 = p0 + v1
-            p2 = p3 + v2
             p0_list.append(p0)
             p3_list.append(p3)
-            segs.append(cubic(p0, p1, p2, p3))
+
+            if offs:
+                k = len(offs)
+                line_vec = p3 - p0
+                segs_i = []
+                for j, (vv1, vv2) in enumerate(offs):
+                    start = p0 + line_vec * (j / k)
+                    end = p0 + line_vec * ((j + 1) / k)
+                    p1 = start + np.asarray(vv1, dtype=float)
+                    p2 = end + np.asarray(vv2, dtype=float)
+                    segs_i.append(cubic(start, p1, p2, end))
+                segs.append(segs_i)
+            else:
+                segs.append([line(p0, p3)])
 
         arcs = []
         for i in range(4):
@@ -181,10 +208,10 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
             arcs.append(arc_from_points(cx, cy, start, end))
 
     dense = np.vstack([
-        arcs[0], segs[0],
-        arcs[1], segs[1],
-        arcs[2], segs[2],
-        arcs[3], segs[3],
+        arcs[0], *segs[0],
+        arcs[1], *segs[1],
+        arcs[2], *segs[2],
+        arcs[3], *segs[3],
     ])
     seg = np.linalg.norm(np.diff(dense, axis=0, append=dense[:1]), axis=1)
     s = np.concatenate(([0.0], np.cumsum(seg[:-1])))
@@ -273,7 +300,13 @@ def rounded_rect_area(
     for i in range(4):
         c0 = centers[i]
         c1 = centers[(i + 1) % 4]
-        v1, v2 = [np.asarray(v, dtype=float) for v in bezier_ctrl_offsets[i]]
+        offs = bezier_ctrl_offsets[i]
+        if offs:
+            v1 = np.asarray(offs[0][0], dtype=float)
+            v2 = np.asarray(offs[-1][1], dtype=float)
+        else:
+            v1 = np.zeros(2)
+            v2 = np.zeros(2)
 
         if np.linalg.norm(v1) < 1e-9:
             ang1 = ang_pairs[i][1]
@@ -289,11 +322,20 @@ def rounded_rect_area(
 
         p0 = c0 + R * np.array([t0[1], -t0[0]])
         p3 = c1 + R * np.array([t1[1], -t1[0]])
-        p1 = p0 + v1
-        p2 = p3 + v2
         p0_list.append(p0)
         p3_list.append(p3)
-        area += _cubic_area(p0, p1, p2, p3)
+
+        if offs:
+            k = len(offs)
+            line_vec = p3 - p0
+            for j, (vv1, vv2) in enumerate(offs):
+                start = p0 + line_vec * (j / k)
+                end = p0 + line_vec * ((j + 1) / k)
+                p1 = start + np.asarray(vv1, dtype=float)
+                p2 = end + np.asarray(vv2, dtype=float)
+                area += _cubic_area(start, p1, p2, end)
+        else:
+            area += 0.5 * (p0[0] * p3[1] - p0[1] * p3[0])
 
     for i in range(4):
         cx, cy = centers[i]
