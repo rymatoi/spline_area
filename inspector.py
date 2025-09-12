@@ -121,6 +121,7 @@ class InspectorWidget(QWidget):
 
     def _change_continuity(self, idx):
         self.main_window.c1 = (idx == 0)
+        self.main_window.compute_default_bezier_offsets()
         self.main_window.redraw_all(preserve_markers=True)
         self.update_error()
 
