@@ -130,36 +130,33 @@ def _collect_segments(points: np.ndarray, seam_indices: Sequence[int]) -> List[n
 
 
 def _ensure_shared_endpoints(segments: List[np.ndarray]) -> List[np.ndarray]:
+    """Return a deep-copied list with matching seam endpoints."""
+
     if not segments:
         return []
+
     shared = [np.array(seg, dtype=float, copy=True) for seg in segments]
     n = len(shared)
     if n <= 1:
         return shared
-    for i in range(n):
-        j = (i + 1) % n
-        if len(shared[i]) == 0 or len(shared[j]) == 0:
+
+    for i in range(n - 1):
+        if len(shared[i]) == 0 or len(shared[i + 1]) == 0:
             continue
-        # Copy the seam point verbatim instead of averaging so that only
-        # designated joints are affected by the C¹ stitching.
-        shared[j][0] = shared[i][-1]
+        shared[i][-1] = shared[i + 1][0]
+
+    # Close the loop explicitly for the last seam.
+    if len(shared[-1]) and len(shared[0]):
+        shared[-1][-1] = shared[0][0]
+
     return shared
 
 
-def _segment_tangent(seg: np.ndarray, *, forward: bool) -> np.ndarray:
-    if len(seg) < 2:
+def _normalized(vec: np.ndarray) -> np.ndarray:
+    norm = float(np.linalg.norm(vec))
+    if norm <= 1e-12:
         return np.zeros(2, dtype=float)
-    if forward:
-        return seg[1] - seg[0]
-    return seg[-1] - seg[-2]
-
-
-def _project_to_direction(vec: np.ndarray, direction: np.ndarray) -> np.ndarray:
-    dir_norm = np.linalg.norm(direction)
-    if dir_norm == 0:
-        return vec
-    unit = direction / dir_norm
-    return np.dot(vec, unit) * unit
+    return vec / norm
 
 
 def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | None = None):
@@ -194,26 +191,44 @@ def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | Non
         }
 
     params = [_chord_param(seg) for seg in segments]
-    joint_tangents = []
-    for i in range(len(segments)):
-        prev_seg = segments[(i - 1) % len(segments)]
+    n = len(segments)
+    start_tangents = [np.zeros(2, dtype=float) for _ in range(n)]
+    end_tangents = [np.zeros(2, dtype=float) for _ in range(n)]
+
+    for i in range(n):
         curr_seg = segments[i]
-        incoming = _segment_tangent(prev_seg, forward=False)
-        outgoing = _segment_tangent(curr_seg, forward=True)
-        tangent = 0.5 * (incoming + outgoing)
-        if len(prev_seg) <= 2:
-            tangent = _project_to_direction(tangent, incoming)
-        if len(curr_seg) <= 2:
-            tangent = _project_to_direction(tangent, outgoing)
-        joint_tangents.append(tangent)
+        next_seg = segments[(i + 1) % n]
+
+        prev_support = curr_seg[-2] if len(curr_seg) >= 2 else curr_seg[-1]
+        next_support = next_seg[1] if len(next_seg) >= 2 else next_seg[0]
+
+        prev_vec = curr_seg[-1] - prev_support
+        next_vec = next_support - next_seg[0]
+
+        prev_param = params[i]
+        next_param = params[(i + 1) % n]
+        prev_len = prev_param[-1] - prev_param[-2] if len(prev_param) >= 2 else 0.0
+        next_len = next_param[1] - next_param[0] if len(next_param) >= 2 else 0.0
+
+        prev_dir = _normalized(prev_vec) if prev_len > 1e-12 else prev_vec
+        next_dir = _normalized(next_vec) if next_len > 1e-12 else next_vec
+
+        tangent = 0.5 * (prev_dir + next_dir)
+        if np.linalg.norm(tangent) <= 1e-12:
+            tangent = prev_dir if np.linalg.norm(prev_dir) > 0 else next_dir
+
+        end_tangents[i] = tangent
+        start_tangents[(i + 1) % n] = tangent
 
     Sx, Sy = [], []
     for i, seg in enumerate(segments):
         t = params[i]
-        start_tangent = joint_tangents[i]
-        end_tangent = joint_tangents[(i + 1) % len(joint_tangents)]
-        Sx.append(CubicSpline(t, seg[:, 0], bc_type=((1, start_tangent[0]), (1, end_tangent[0]))))
-        Sy.append(CubicSpline(t, seg[:, 1], bc_type=((1, start_tangent[1]), (1, end_tangent[1]))))
+        tan_start = start_tangents[i]
+        tan_end = end_tangents[i]
+        Sx.append(CubicSpline(t, seg[:, 0], bc_type=((1, tan_start[0]), (1, tan_end[0]))))
+        Sy.append(CubicSpline(t, seg[:, 1], bc_type=((1, tan_start[1]), (1, tan_end[1]))))
+
+    joint_tangents = [end_tangents[i] for i in range(n)]
 
     return {
         "segments": segments,
@@ -240,7 +255,12 @@ def _sample_segments(spline_data, samples_per_seg: int) -> np.ndarray:
     return np.vstack(pts)
 
 
-def cubic_spline_closed(points: np.ndarray, samples_per_seg: int = 24, *, seam_indices: Sequence[int] | None = None) -> np.ndarray:
+def cubic_spline_closed(
+    points: np.ndarray,
+    samples_per_seg: int = 24,
+    *,
+    seam_indices: Sequence[int] | None = None,
+) -> np.ndarray:
     data = build_c1_closed_spline(points, seam_indices)
     return _sample_segments(data, samples_per_seg)
 
