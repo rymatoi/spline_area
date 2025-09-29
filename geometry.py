@@ -1,4 +1,6 @@
 import math
+from typing import List, Sequence
+
 import numpy as np
 from scipy.interpolate import CubicSpline
 
@@ -89,15 +91,178 @@ def rounded_rect_points(a, b, R, *, step=5.0, n_arc=180, n_line=200, centers=Non
     return np.column_stack((x, y))
 
 
-def cubic_spline_closed(points: np.ndarray, samples_per_seg: int = 24) -> np.ndarray:
+def _chord_param(points: np.ndarray) -> np.ndarray:
+    pts = np.asarray(points, dtype=float)
+    if len(pts) == 0:
+        return np.array([], dtype=float)
+    diffs = np.diff(pts, axis=0)
+    seg = np.linalg.norm(diffs, axis=1)
+    t = np.concatenate(([0.0], np.cumsum(seg)))
+    if t[-1] == 0:
+        t = np.arange(len(pts), dtype=float)
+    return t
+
+
+def _collect_segments(points: np.ndarray, seam_indices: Sequence[int]) -> List[np.ndarray]:
     P = np.asarray(points, dtype=float)
     N = len(P)
-    t = np.arange(N + 1)
-    xy = np.vstack([P, P[0]])
-    ts_dense = np.linspace(0, N, N * samples_per_seg, endpoint=False)
-    cs_x = CubicSpline(t, xy[:, 0], bc_type='periodic')
-    cs_y = CubicSpline(t, xy[:, 1], bc_type='periodic')
-    return np.column_stack([cs_x(ts_dense), cs_y(ts_dense)])
+    if N == 0:
+        return []
+    if not seam_indices:
+        return [P]
+    seams = np.unique(np.mod(seam_indices, N))
+    seams.sort()
+    if len(seams) < 2:
+        return [P]
+
+    segments = []
+    for i in range(len(seams)):
+        start = int(seams[i])
+        end = int(seams[(i + 1) % len(seams)])
+        seg_pts = [P[start]]
+        idx = (start + 1) % N
+        while idx != end:
+            seg_pts.append(P[idx])
+            idx = (idx + 1) % N
+        seg_pts.append(P[end])
+        segments.append(np.array(seg_pts, dtype=float))
+    return segments
+
+
+def _ensure_shared_endpoints(segments: List[np.ndarray]) -> List[np.ndarray]:
+    """Return a deep-copied list with matching seam endpoints."""
+
+    if not segments:
+        return []
+
+    shared = [np.array(seg, dtype=float, copy=True) for seg in segments]
+    n = len(shared)
+    if n <= 1:
+        return shared
+
+    for i in range(n - 1):
+        if len(shared[i]) == 0 or len(shared[i + 1]) == 0:
+            continue
+        shared[i][-1] = shared[i + 1][0]
+
+    # Close the loop explicitly for the last seam.
+    if len(shared[-1]) and len(shared[0]):
+        shared[-1][-1] = shared[0][0]
+
+    return shared
+
+
+def _normalized(vec: np.ndarray) -> np.ndarray:
+    norm = float(np.linalg.norm(vec))
+    if norm <= 1e-12:
+        return np.zeros(2, dtype=float)
+    return vec / norm
+
+
+def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | None = None):
+    """Return per-segment cubic splines stitched with C¹ continuity."""
+
+    P = np.asarray(points, dtype=float)
+    if P.ndim != 2 or P.shape[1] != 2:
+        raise ValueError("points must be an array of shape (N, 2)")
+    N = len(P)
+    if N == 0:
+        return {
+            "segments": [],
+            "params": [],
+            "Sx": [],
+            "Sy": [],
+            "joint_tangents": [],
+        }
+
+    segments = _collect_segments(P, seam_indices or [])
+    segments = _ensure_shared_endpoints(segments)
+    if len(segments) == 1:
+        t = np.arange(N + 1)
+        xy = np.vstack([P, P[0]])
+        cs_x = CubicSpline(t, xy[:, 0], bc_type="periodic")
+        cs_y = CubicSpline(t, xy[:, 1], bc_type="periodic")
+        return {
+            "segments": [P],
+            "params": [t],
+            "Sx": [cs_x],
+            "Sy": [cs_y],
+            "joint_tangents": [],
+        }
+
+    params = [_chord_param(seg) for seg in segments]
+    n = len(segments)
+    start_tangents = [np.zeros(2, dtype=float) for _ in range(n)]
+    end_tangents = [np.zeros(2, dtype=float) for _ in range(n)]
+
+    for i in range(n):
+        curr_seg = segments[i]
+        next_seg = segments[(i + 1) % n]
+
+        prev_support = curr_seg[-2] if len(curr_seg) >= 2 else curr_seg[-1]
+        next_support = next_seg[1] if len(next_seg) >= 2 else next_seg[0]
+
+        prev_vec = curr_seg[-1] - prev_support
+        next_vec = next_support - next_seg[0]
+
+        prev_param = params[i]
+        next_param = params[(i + 1) % n]
+        prev_len = prev_param[-1] - prev_param[-2] if len(prev_param) >= 2 else 0.0
+        next_len = next_param[1] - next_param[0] if len(next_param) >= 2 else 0.0
+
+        prev_dir = _normalized(prev_vec) if prev_len > 1e-12 else prev_vec
+        next_dir = _normalized(next_vec) if next_len > 1e-12 else next_vec
+
+        tangent = 0.5 * (prev_dir + next_dir)
+        if np.linalg.norm(tangent) <= 1e-12:
+            tangent = prev_dir if np.linalg.norm(prev_dir) > 0 else next_dir
+
+        end_tangents[i] = tangent
+        start_tangents[(i + 1) % n] = tangent
+
+    Sx, Sy = [], []
+    for i, seg in enumerate(segments):
+        t = params[i]
+        tan_start = start_tangents[i]
+        tan_end = end_tangents[i]
+        Sx.append(CubicSpline(t, seg[:, 0], bc_type=((1, tan_start[0]), (1, tan_end[0]))))
+        Sy.append(CubicSpline(t, seg[:, 1], bc_type=((1, tan_start[1]), (1, tan_end[1]))))
+
+    joint_tangents = [end_tangents[i] for i in range(n)]
+
+    return {
+        "segments": segments,
+        "params": params,
+        "Sx": Sx,
+        "Sy": Sy,
+        "joint_tangents": joint_tangents,
+    }
+
+
+def _sample_segments(spline_data, samples_per_seg: int) -> np.ndarray:
+    if samples_per_seg <= 0:
+        raise ValueError("samples_per_seg must be positive")
+
+    pts = []
+    for cs_x, cs_y, t in zip(spline_data["Sx"], spline_data["Sy"], spline_data["params"]):
+        if len(t) == 0:
+            continue
+        n_interval = max(1, len(t) - 1)
+        u = np.linspace(t[0], t[-1], n_interval * samples_per_seg, endpoint=False)
+        pts.append(np.column_stack([cs_x(u), cs_y(u)]))
+    if not pts:
+        return np.zeros((0, 2))
+    return np.vstack(pts)
+
+
+def cubic_spline_closed(
+    points: np.ndarray,
+    samples_per_seg: int = 24,
+    *,
+    seam_indices: Sequence[int] | None = None,
+) -> np.ndarray:
+    data = build_c1_closed_spline(points, seam_indices)
+    return _sample_segments(data, samples_per_seg)
 
 
 def rounded_rect_area(a: float, b: float, R: float, *, centers=None) -> float:
