@@ -129,6 +129,23 @@ def _collect_segments(points: np.ndarray, seam_indices: Sequence[int]) -> List[n
     return segments
 
 
+def _ensure_shared_endpoints(segments: List[np.ndarray]) -> List[np.ndarray]:
+    if not segments:
+        return []
+    shared = [np.array(seg, dtype=float, copy=True) for seg in segments]
+    n = len(shared)
+    if n <= 1:
+        return shared
+    for i in range(n):
+        j = (i + 1) % n
+        if len(shared[i]) == 0 or len(shared[j]) == 0:
+            continue
+        avg = 0.5 * (shared[i][-1] + shared[j][0])
+        shared[i][-1] = avg
+        shared[j][0] = avg
+    return shared
+
+
 def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | None = None):
     """Return per-segment cubic splines stitched with C¹ continuity."""
 
@@ -146,6 +163,7 @@ def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | Non
         }
 
     segments = _collect_segments(P, seam_indices or [])
+    segments = _ensure_shared_endpoints(segments)
     if len(segments) == 1:
         t = np.arange(N + 1)
         xy = np.vstack([P, P[0]])
