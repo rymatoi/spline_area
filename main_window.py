@@ -1,11 +1,9 @@
-import math
 import numpy as np
 from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QPen, QBrush, QPainterPath, QColor, QFont, QTransform, QPainter
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QMainWindow, QDockWidget
 
-from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed
-from scipy.interpolate import CubicSpline
+from geometry import arc_geom_points, rounded_rect_points, cubic_spline_closed, build_c1_closed_spline
 from points import GroupOfPoints, FreePoint, CenterPoint
 from inspector import InspectorWidget
 
@@ -238,28 +236,37 @@ class MainWindow(QMainWindow):
         self._draw_contour(contour)
         self._draw_spline()
 
-    def get_all_marker_positions(self):
+    def get_all_marker_positions(self, return_meta=False):
         contour = self.get_contour()
-        points = []
+        entries = []
         for grp in self.groups:
             for pt in grp.points:
                 p = pt.pos()
                 arr = np.array([p.x(), p.y()])
                 idx = int(np.argmin(np.linalg.norm(contour - arr, axis=1)))
                 percent = idx / len(contour)
-                points.append((percent, (p.x(), p.y())))
+                is_seam = abs(pt.offset) == grp.offsets[1]
+                entries.append((percent % 1.0, (p.x(), p.y()), is_seam))
         for fp in self.free_points:
             percent = fp.percent % 1.0
             p = fp.pos()
-            points.append((percent, (p.x(), p.y())))
-        points.sort(key=lambda x: x[0])
-        return [xy for percent, xy in points]
+            entries.append((percent, (p.x(), p.y()), False))
+        entries.sort(key=lambda x: x[0])
+        positions = [xy for _, xy, _ in entries]
+        if return_meta:
+            seam_indices = [i for i, (_, _, is_seam) in enumerate(entries) if is_seam]
+            return positions, seam_indices
+        return positions
 
     def _draw_spline(self):
-        pts = self.get_all_marker_positions()
+        pts, seam_indices = self.get_all_marker_positions(return_meta=True)
         if len(pts) < 4:
             return
-        spline_pts = cubic_spline_closed(np.array(pts), samples_per_seg=24)
+        spline_pts = cubic_spline_closed(
+            np.array(pts),
+            samples_per_seg=24,
+            seam_indices=seam_indices,
+        )
         path = QPainterPath()
         path.moveTo(*spline_pts[0])
         for x, y in spline_pts[1:]:
@@ -368,36 +375,46 @@ class MainWindow(QMainWindow):
             pt._syncing = False
 
     def spline_area(self):
-        pts = self.get_all_marker_positions()
+        pts, seam_indices = self.get_all_marker_positions(return_meta=True)
         if len(pts) < 4:
             return 0.0
         pts = np.array(pts)
-        N = len(pts)
-        t = np.arange(N + 1)
-        xy = np.vstack([pts, pts[0]])
-        ts_dense = np.linspace(0, N, N, endpoint=True)
-        cs_x = CubicSpline(t, xy[:, 0], bc_type='periodic')
-        cs_y = CubicSpline(t, xy[:, 1], bc_type='periodic')
-        bezier_segments = self.spline_to_bezier(cs_x, cs_y, t)
+        spline_data = build_c1_closed_spline(pts, seam_indices)
+        bezier_segments = self.spline_to_bezier(spline_data)
         area = sum(self.eval_segment_area(seg) for seg in bezier_segments)
         return abs(area)
 
-    def spline_to_bezier(self, cs_x, cs_y, t_range):
+    def spline_to_bezier(self, spline_data):
         bezier_segments = []
-        for i in range(len(t_range) - 1):
-            t_start = t_range[i]
-            t_end = t_range[i + 1]
-            dt = t_end - t_start
-            p0_x = cs_x(t_start)
-            p0_y = cs_y(t_start)
-            p1_x = p0_x + dt * cs_x.derivative()(t_start) / 3
-            p1_y = p0_y + dt * cs_y.derivative()(t_start) / 3
-            p3_x = cs_x(t_end)
-            p3_y = cs_y(t_end)
-            p2_x = p3_x - dt * cs_x.derivative()(t_end) / 3
-            p2_y = cs_y(t_end) - dt * cs_y.derivative()(t_end) / 3
-            bezier_segment = np.array([[p0_x, p0_y], [p1_x, p1_y], [p2_x, p2_y], [p3_x, p3_y]])
-            bezier_segments.append(bezier_segment)
+        for cs_x, cs_y, t_range in zip(
+            spline_data["Sx"],
+            spline_data["Sy"],
+            spline_data["params"],
+        ):
+            d_x = cs_x.derivative()
+            d_y = cs_y.derivative()
+            for j in range(len(t_range) - 1):
+                t_start = t_range[j]
+                t_end = t_range[j + 1]
+                dt = t_end - t_start
+                p0_x = cs_x(t_start)
+                p0_y = cs_y(t_start)
+                p3_x = cs_x(t_end)
+                p3_y = cs_y(t_end)
+                dp0 = np.array([d_x(t_start), d_y(t_start)])
+                dp1 = np.array([d_x(t_end), d_y(t_end)])
+                p1 = np.array([p0_x, p0_y]) + dt * dp0 / 3.0
+                p2 = np.array([p3_x, p3_y]) - dt * dp1 / 3.0
+                bezier_segments.append(
+                    np.array(
+                        [
+                            [p0_x, p0_y],
+                            p1,
+                            p2,
+                            [p3_x, p3_y],
+                        ]
+                    )
+                )
         return bezier_segments
 
     def eval_segment_area(self, segment):
