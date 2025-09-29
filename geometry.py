@@ -140,10 +140,26 @@ def _ensure_shared_endpoints(segments: List[np.ndarray]) -> List[np.ndarray]:
         j = (i + 1) % n
         if len(shared[i]) == 0 or len(shared[j]) == 0:
             continue
-        avg = 0.5 * (shared[i][-1] + shared[j][0])
-        shared[i][-1] = avg
-        shared[j][0] = avg
+        # Copy the seam point verbatim instead of averaging so that only
+        # designated joints are affected by the C¹ stitching.
+        shared[j][0] = shared[i][-1]
     return shared
+
+
+def _segment_tangent(seg: np.ndarray, *, forward: bool) -> np.ndarray:
+    if len(seg) < 2:
+        return np.zeros(2, dtype=float)
+    if forward:
+        return seg[1] - seg[0]
+    return seg[-1] - seg[-2]
+
+
+def _project_to_direction(vec: np.ndarray, direction: np.ndarray) -> np.ndarray:
+    dir_norm = np.linalg.norm(direction)
+    if dir_norm == 0:
+        return vec
+    unit = direction / dir_norm
+    return np.dot(vec, unit) * unit
 
 
 def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | None = None):
@@ -182,9 +198,14 @@ def build_c1_closed_spline(points: np.ndarray, seam_indices: Sequence[int] | Non
     for i in range(len(segments)):
         prev_seg = segments[(i - 1) % len(segments)]
         curr_seg = segments[i]
-        prev_pt = prev_seg[-2] if len(prev_seg) >= 2 else prev_seg[-1]
-        next_pt = curr_seg[1] if len(curr_seg) >= 2 else curr_seg[0]
-        joint_tangents.append(0.5 * (next_pt - prev_pt))
+        incoming = _segment_tangent(prev_seg, forward=False)
+        outgoing = _segment_tangent(curr_seg, forward=True)
+        tangent = 0.5 * (incoming + outgoing)
+        if len(prev_seg) <= 2:
+            tangent = _project_to_direction(tangent, incoming)
+        if len(curr_seg) <= 2:
+            tangent = _project_to_direction(tangent, outgoing)
+        joint_tangents.append(tangent)
 
     Sx, Sy = [], []
     for i, seg in enumerate(segments):
